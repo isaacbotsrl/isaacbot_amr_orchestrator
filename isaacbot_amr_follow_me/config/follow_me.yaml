@@ -1,0 +1,15 @@
+# isaacbot_amr_follow_me's follow_me node. The following itself (distance, speed, search) is the
+# Nav 2 Following server's: following_server in isaacbot_amr_navigation/config/isaacbot_amr_nav_params.yaml.
+# "/**/": the node runs in the isaacbot namespace, which a bare node name would not match.
+/**/follow_me:
+  ros__parameters:
+    action_name: follow_object   # the Following server's action, in the same namespace
+    target_timeout: 1.0          # s; an older tracked_person counts as no person (start refused)
+    # Person lost while following: the isaacbot stands and waits for them, with no time limit, and
+    # follows again once fmoc tracks them. false: follow-me ends (IDLE).
+    wait_when_lost: true
+    # With wait_when_lost, a goal the Following server ended on its own failure (a late TF under
+    # load) is resumed the same way; this many failures within the window end follow-me.
+    max_server_failures: 3
+    server_failure_window: 30.0  # s
+    update_rate: 5.0             # Hz; checks drive mode / mission state, publishes the status

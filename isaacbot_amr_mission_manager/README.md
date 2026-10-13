@@ -1,0 +1,167 @@
+# isaacbot_amr_mission_manager
+
+Behavior-tree-driven mission supervision for the Ardennes, running on the orchestrator
+computer next to `isaacbot_amr_navigation`.
+
+The shape is the "manager" pattern used throughout this fleet (`isaacbot_amr_safety` in `isaacbot_amr_ros`
+follows it too): a plain node owns a BehaviorTree, ticks it once per wall-timer period, loads
+its leaf nodes from `.so` names given as parameters, and exposes the live tree to Groot2.
+
+## Two layers, on purpose
+
+| Layer | What it owns | Change it by |
+|---|---|---|
+| The **behavior tree** (`behavior_trees/isaacbot_amr_mission.xml`) | Operator-facing policy: guards, sequencing, which leaf nodes run in what order. | Editing XML / Groot2. No rebuild. |
+| **`RunMissionUseCase`** (`application/`) | The invariants: waypoint cursor, hold/resume, abort rules. | C++, with unit tests. |
+
+**The shipped tree does not call Nav 2.** Waypoint dispatch belongs to `RunMissionUseCase`,
+which owns the mission cursor; adding a `NavigateToPose` node to the tree as well would give
+the isaacbot two independent things sending goals to the same action server. If you do want the
+tree to drive Nav 2, list `nav2_behavior_tree`'s prebuilt plugins in `ros_plugin_libs` and
+read the note at the top of the tree file first.
+
+## Architecture
+
+Clean Architecture, matching `isaacbot_amr_battery` and `isaacbot_amr_hardware_interface`:
+
+```
+include/isaacbot_amr_mission_manager/
+├── domain/                     # pure C++: no ROS, no BehaviorTree, no I/O
+│   ├── mission.hpp             #   Mission, Waypoint, MissionState
+│   ├── mission_policy.hpp      #   when it is safe to drive
+│   └── ports/                  #   NavigationPort, MissionStatusPublisherPort
+├── application/
+│   └── run_mission_use_case.hpp
+└── infrastructure/             # ROS 2 + BehaviorTree adapters
+    ├── mission_manager_node.hpp
+    ├── behavior_tree_runner.hpp
+    ├── nav2_navigation_adapter.hpp
+    └── ros_mission_status_publisher.hpp
+```
+
+`CMakeLists.txt` splits this into `isaacbot_amr_mission_manager_core` (domain + application, links no
+ROS) and `isaacbot_amr_mission_manager_ros`, and `scripts/check_domain_purity.sh` runs as a CTest
+that fails if a ROS or BehaviorTree header ever appears under `domain/`.
+
+`infrastructure/behavior_tree_runner.hpp` is a generalised copy of
+`isaacbot_amr_safety::BehaviorTreeSafety`. It is duplicated rather than reused because `isaacbot_amr_safety`
+ships in the separate `isaacbot_amr_ros` repository, its class is safety-specific, and its
+`CMakeLists.txt` exports `include/isaacbot_amr_safety` rather than `include`, so its headers do not
+resolve from a downstream package. If that class is ever promoted to `isaacbot_amr_utils`, delete
+this header in favour of it.
+
+## Running
+
+```bash
+ros2 launch isaacbot_amr_mission_manager isaacbot_amr_mission_manager.launch.py \
+  localization_source:=gps \
+  namespace:=isaacbot
+```
+
+`localization_source` **must match what `isaacbot_amr_navigation` was launched with** — it is what
+decides whether waypoints are interpreted in `<namespace>/odom` (`odom`) or
+`<namespace>/map` (`gps`, `slam`, `amcl`). `isaacbot_amr_navigation`'s
+`test_localization_launch.py` asserts the two argument declarations stay in sync.
+
+## Interfaces
+
+| Direction | Name | Type |
+|---|---|---|
+| in | `drive_mode` | `isaacbot_amr_msgs/DriveMode`, latched — from `isaacbot_amr_drive_mode`; missions run only in AUTOMATIC |
+| in | `motion_lock` | `std_msgs/Bool` — from `isaacbot_amr_motion_lock_node` |
+| in | `battery/battery_status` | `sensor_msgs/BatteryState` (`battery_topic`) |
+| in | `diagnostics` | `diagnostic_msgs/DiagnosticArray` — `isaacbot_amr_rs16_lidar`'s health task |
+| out | `mission_status` | `std_msgs/String`, latched — one line, for logs |
+| out | `mission_state` | `isaacbot_amr_msgs/MissionState`, latched — for UIs (isaacbot_amr_drive_interface) |
+| service | `set_mission` | `isaacbot_amr_msgs/SetMission` — replace the active mission with these waypoints and start it |
+| service | `run_mission` | `std_srvs/SetBool` — `false` cancels; `true` is refused (use `set_mission`) |
+| action client | `navigate_to_pose` | `nav2_msgs/action/NavigateToPose` |
+
+### Mission source
+
+`set_mission` (`isaacbot_amr_msgs/srv/SetMission`) takes a list of `geometry_msgs/PoseStamped`
+waypoints and hands them to `RunMissionUseCase::accept`. That cancels anything in flight, so a
+GoTo from the drive UI is simply a one-waypoint mission that replaces the previous one.
+
+- **Frames:** every waypoint must leave `frame_id` empty or use the manager's goal frame. The
+  manager has no TF buffer, so a pose in another frame is rejected rather than driven to in
+  the wrong frame.
+- **Rejected requests:** an empty list, or a non-finite position or zero quaternion.
+- **Driving mode:** refused unless `drive_mode` is AUTOMATIC ("Drive mode is not AUTOMATIC"),
+  and the active mission is left alone.
+- **Ids:** an empty `mission_id` becomes `mission-<n>`.
+- **Cancelling:** `run_mission` with `data: false`.
+
+The request translation lives in `infrastructure/mission_request.cpp` and is unit tested in
+`test/unit/test_mission_request.cpp`.
+
+## Safety behaviour
+
+Leaving the AUTOMATIC driving mode is a **cancel**, checked right after the battery abort: the
+operator switched modes, or took over with the web joystick (which `isaacbot_amr_drive_mode` turns into
+a switch to ASSISTED). The mission is cancelled with the reason "drive mode left AUTOMATIC" and
+does not resume when AUTOMATIC comes back; a hold would. It is fail-safe on "never heard": until
+`drive_mode` reports AUTOMATIC, missions are refused. There is no staleness timeout, because the
+topic is latched and published on change only; if `isaacbot_amr_drive_mode` dies, it also stops
+forwarding Nav 2's commands, so a stale AUTOMATIC cannot drive the isaacbot.
+`require_automatic_drive_mode: false` turns the gate off, for a stack without `isaacbot_amr_drive_mode`.
+
+The motion lock is a **hold**, not an abort: it is how an operator pauses the isaacbot, so the
+mission survives it and resumes on the same waypoint. It is fail-safe in both places that
+read it — the `IsMotionLocked` BT condition and `MissionManagerNode::currentConditions()`
+both treat "no message yet" and "last message older than `motion_lock_timeout`" as locked,
+the same rule `isaacbot_amr_twist_mux` applies so that a dead `isaacbot_amr_motion_lock_node` closes the
+mux rather than opening it.
+
+A battery below `abort_battery_fraction` is an **abort**, checked before the lock: holding
+would only keep discharging, and an engaged lock must not mask why the mission stopped. The
+battery is ignored entirely until the first `BatteryState` with a non-NaN `percentage`.
+
+A dead lidar is a **hold** too, for the same reason as the lock: Nav 2's costmaps stop being
+trustworthy without it, but the sensor can come back and the mission should resume on the same
+waypoint. `isaacbot_amr_rs16_lidar` exposes no service, no lifecycle transition and no boolean "lidar ok"
+topic, so its `diagnostic_updater` task `isaacbot_amr_rs16_lidar_node: Lidar status` is the only signal
+there is — the manager watches the raw `diagnostics` topic rather than `diagnostics_agg` so it
+does not depend on `isaacbot_amr_diag_manager`'s aggregator running. `OK` and `WARN` both count as
+usable (a sparse cloud or a low rate degrades the costmaps but does not invalidate them);
+`ERROR`, `STALE` and a status older than `lidar_health_timeout` do not.
+
+Unlike the motion lock, this is **not** fail-safe on "never heard": `require_lidar` defaults to
+`false` so a isaacbot booted with `ISAACBOT_AMR_SYSTEM_USE_LIDAR=false` still runs missions, and so that
+a lidar driver that starts after the mission manager (it runs in a separate container,
+`rover-a1-sensors`) does not block the first mission. Set
+`require_lidar: true` on a isaacbot that always carries one. The same reasoning and the same
+default apply to `IsLidarHealthy`'s `require_present` port in `isaacbot_amr_navigation`.
+
+## Parameters
+
+Generated by `generate_parameter_library` from `src/mission_manager_parameters.yaml`; defaults
+live there, and `config/mission_manager.yaml` carries the deployed values. Notable ones:
+
+| Parameter | Default | Notes |
+|---|---|---|
+| `bt_project_path` | *(required)* | The node refuses to start without it. |
+| `tree_name` | `IsaacbotMission` | Tree ID inside the project. |
+| `timer_frequency` | `20.0` Hz | Tick rate. |
+| `bt_server_port` | `4444` | Groot2. The next free port is used if taken, so several managers coexist. |
+| `plugin_libs` | `[is_motion_locked_bt_node]` | Plain BT.CPP plugins. Built by `isaacbot_amr_navigation`. |
+| `ros_plugin_libs` | *(unset)* | See the note in `config/mission_manager.yaml` — an empty YAML list is rejected by rcl, so leave it unset rather than writing `[]`. |
+| `goal_frame_id` | `""` | Empty derives `<namespace>/odom`; the launch file sets it to `<namespace>/map` for `gps`, `slam` and `amcl`. |
+| `drive_mode_topic` | `drive_mode` | Latched `isaacbot_amr_msgs/DriveMode` from `isaacbot_amr_drive_mode`. |
+| `require_automatic_drive_mode` | `true` | Missions run only in AUTOMATIC. `false` only without `isaacbot_amr_drive_mode`. |
+| `motion_lock_timeout` | `0.5` s | Publisher runs at 10 Hz. |
+| `lidar_health_topic` | `diagnostics` | Raw `DiagnosticArray` topic, not `diagnostics_agg`. |
+| `lidar_status_name` | `isaacbot_amr_rs16_lidar_node: Lidar status` | Exact `DiagnosticStatus` name to match. |
+| `lidar_health_timeout` | `3.0` s | `diagnostic_updater` publishes at 1 Hz. |
+| `require_lidar` | `false` | When true, a never-seen lidar status holds the mission. |
+| `abort_battery_fraction` | `0.10` | 0..1, matching `BatteryState::percentage`. |
+
+## Testing
+
+```bash
+colcon test --packages-select isaacbot_amr_mission_manager
+colcon test-result --all
+```
+
+33 unit tests covering the mission state machine, the policy (including the lidar-health
+rules) and the use case, plus the domain-purity check. All run without a ROS graph, which is the point of the `_core` split.

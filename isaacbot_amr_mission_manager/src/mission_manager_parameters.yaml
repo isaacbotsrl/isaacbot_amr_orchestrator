@@ -1,0 +1,143 @@
+mission_manager:
+
+  bt_project_path:
+    type: string
+    default_value: ""
+    description: Path to the BehaviorTree project (XML) the manager ticks.
+
+  bt_server_port:
+    type: int
+    default_value: 4444
+    description: >
+      Preferred port for the Groot2 publisher. If it is taken the next free port is used, so
+      several managers can run side by side.
+    validation: { gt<>: 0 }
+
+  tree_name:
+    type: string
+    default_value: "IsaacbotMission"
+    description: ID of the tree to run inside the BehaviorTree project.
+
+  timer_frequency:
+    type: double
+    default_value: 20.0
+    description: Frequency in Hz at which the mission tree is ticked.
+    validation: { gt<>: 0.0 }
+
+  plugin_libs:
+    type: string_array
+    default_value: []
+    description: Plain BehaviorTree.CPP plugin libraries to register before building the tree.
+
+  ros_plugin_libs:
+    type: string_array
+    default_value: []
+    description: >
+      BehaviorTree plugin libraries that need the ROS node handle on the blackboard. These are
+      registered after `node` is seeded, so nav2_behavior_tree plugins can find it.
+
+  drive_mode_topic:
+    type: string
+    default_value: "drive_mode"
+    description: >
+      Latched isaacbot_amr_msgs/DriveMode from isaacbot_amr_drive_mode. Missions are accepted and run only
+      while it reports AUTOMATIC; leaving AUTOMATIC cancels the active mission.
+
+  require_automatic_drive_mode:
+    type: bool
+    default_value: true
+    description: >
+      Gate missions on drive_mode. Set false only on a stack without isaacbot_amr_drive_mode; there,
+      nothing else stops a mission when an operator takes the isaacbot back.
+
+  motion_lock_topic:
+    type: string
+    default_value: "motion_lock"
+    description: std_msgs/Bool topic carrying isaacbot_amr_twist_mux's motion lock state.
+
+  motion_lock_timeout:
+    type: double
+    default_value: 0.5
+    description: >
+      Seconds after which a missing motion_lock message counts as locked. The publisher runs
+      at 10 Hz. Fail-safe, matching isaacbot_amr_twist_mux.
+    validation: { gt<>: 0.0 }
+
+  battery_topic:
+    type: string
+    default_value: "battery/battery_status"
+    description: sensor_msgs/BatteryState topic used for the mission abort threshold.
+
+  abort_battery_fraction:
+    type: double
+    default_value: 0.10
+    description: >
+      State of charge (0..1) below which an active mission is aborted. The battery is ignored
+      until the first BatteryState message arrives.
+    validation: { bounds<>: [0.0, 1.0] }
+
+  lidar_health_topic:
+    type: string
+    default_value: "diagnostics"
+    description: >
+      diagnostic_msgs/DiagnosticArray topic carrying isaacbot_amr_rs16_lidar's health task. The raw
+      /diagnostics topic is watched rather than diagnostics_agg so this does not depend on
+      isaacbot_amr_diag_manager's aggregator running.
+
+  lidar_status_name:
+    type: string
+    default_value: "isaacbot_amr_rs16_lidar_node: Lidar status"
+    description: >
+      Exact DiagnosticStatus name to match. isaacbot_amr_rs16_lidar registers the task as "Lidar status"
+      with hardware ID IsaacbotLidar; the node name is prefixed by diagnostic_updater.
+
+  lidar_health_timeout:
+    type: double
+    default_value: 3.0
+    description: >
+      Seconds after which a missing lidar status counts as unhealthy. diagnostic_updater
+      publishes at 1 Hz.
+    validation: { gt<>: 0.0 }
+
+  require_lidar:
+    type: bool
+    default_value: false
+    description: >
+      When true, a lidar status that has never been seen holds the mission. Leave false on a
+      isaacbot that may run with ISAACBOT_AMR_SYSTEM_USE_LIDAR=false, or the mission would never start.
+
+  navigate_to_pose_action:
+    type: string
+    default_value: "navigate_to_pose"
+    description: Nav 2 action the manager drives waypoints through.
+
+  goal_frame_id:
+    type: string
+    default_value: ""
+    description: >
+      Frame that mission waypoints are expressed in. Leave empty to derive it from the node
+      namespace, which yields <namespace>/odom. It MUST match isaacbot_amr_navigation's
+      `localization_source`: <namespace>/map in gps or slam mode, <namespace>/odom otherwise.
+
+  mission_status_topic:
+    type: string
+    default_value: "mission_status"
+    description: Topic the manager reports mission progress on (std_msgs/String, for logs).
+
+  mission_state_topic:
+    type: string
+    default_value: "mission_state"
+    description: Topic the manager reports mission progress on as isaacbot_amr_msgs/MissionState.
+
+  ros_communication_timeout:
+    availability:
+      type: double
+      default_value: 1.0
+      description: Seconds to wait for a service/action server to appear.
+      validation: { gt<>: 0.0 }
+
+    response:
+      type: double
+      default_value: 1.0
+      description: Seconds to wait for a service/action response after calling.
+      validation: { gt<>: 0.0 }

@@ -1,0 +1,53 @@
+
+<!--
+  This Behavior Tree replans the global path periodically at 1 Hz and it also has
+  recovery actions specific to planning / control as well as general system issues.
+  This will be continuous if a kinematically valid planner is selected.
+-->
+<root BTCPP_format="4" main_tree_to_execute="MainTree">
+  <BehaviorTree ID="MainTree">
+    <ReactiveSequence>
+      <!-- Re-ticked every cycle by the ReactiveSequence: if isaacbot_amr_motion_lock_node engages
+           the lock (or stops publishing), IsMotionLocked returns SUCCESS, the Inverter turns
+           that into FAILURE and the whole tree aborts. isaacbot_amr_twist_mux masks the velocity
+           command independently; this just stops Nav 2 fighting a closed mux. -->
+      <Inverter>
+        <IsMotionLocked topic="motion_lock" timeout="0.5" />
+      </Inverter>
+      <!-- Also re-ticked every cycle. The costmaps are only as trustworthy as the sensor
+           marking them, so if isaacbot_amr_rs16_lidar stops streaming (diagnostic level ERROR/STALE, or
+           the status goes stale) this returns FAILURE and the tree aborts. Note the polarity
+           is the opposite of IsMotionLocked: SUCCESS means healthy, so there is no Inverter.
+           It returns SUCCESS when the status has never been seen at all, which is what keeps
+           ISAACBOT_AMR_SYSTEM_USE_LIDAR=false operation working; set require_present="true" on a isaacbot
+           that always carries a lidar. -->
+      <IsLidarHealthy topic="diagnostics" status_name="isaacbot_amr_rs16_lidar_node: Lidar status" timeout="3.0" require_present="false" />
+      <RecoveryNode number_of_retries="6" name="NavigateRecovery">
+        <PipelineSequence name="NavigateWithReplanning">
+          <RateController hz="1.0">
+            <RecoveryNode number_of_retries="1" name="ComputePathToPose">
+              <ComputePathToPose goal="{goal}" path="{path}" planner_id="GridBased" />
+              <ClearEntireCostmap name="ClearGlobalCostmap-Context" service_name="global_costmap/clear_entirely_global_costmap" />
+            </RecoveryNode>
+          </RateController>
+          <RecoveryNode number_of_retries="1" name="FollowPath">
+            <FollowPath path="{path}" controller_id="FollowPath" />
+            <ClearEntireCostmap name="ClearLocalCostmap-Context" service_name="local_costmap/clear_entirely_local_costmap" />
+          </RecoveryNode>
+        </PipelineSequence>
+        <ReactiveFallback name="RecoveryFallback">
+          <GoalUpdated />
+          <RoundRobin name="RecoveryActions">
+            <Sequence name="ClearingActions">
+              <ClearEntireCostmap name="ClearLocalCostmap-Subtree" service_name="local_costmap/clear_entirely_local_costmap" />
+              <ClearEntireCostmap name="ClearGlobalCostmap-Subtree" service_name="global_costmap/clear_entirely_global_costmap" />
+            </Sequence>
+            <Spin spin_dist="1.57" />
+            <Wait wait_duration="5" />
+            <BackUp backup_dist="0.30" backup_speed="0.05" />
+          </RoundRobin>
+        </ReactiveFallback>
+      </RecoveryNode>
+    </ReactiveSequence>
+  </BehaviorTree>
+</root>

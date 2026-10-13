@@ -1,0 +1,39 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>isaacbot_amr_mission_manager</name>
+  <version>1.0.0</version>
+  <description>
+    Behavior-tree-driven mission supervision for the Ardennes orchestrator computer.
+  </description>
+  <maintainer email="potlogradu@gmail.com">root</maintainer>
+  <license>Apache License 2.0</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>behaviortree_cpp</depend>
+  <depend>diagnostic_msgs</depend>
+  <depend>generate_parameter_library</depend>
+  <depend>geometry_msgs</depend>
+  <depend>nav2_msgs</depend>
+  <depend>nav2_ros_common</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
+  <depend>isaacbot_amr_msgs</depend>
+  <depend>isaacbot_amr_utils</depend>
+  <depend>sensor_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>std_srvs</depend>
+
+  <!-- nav2_navigate_to_pose_action_bt_node / nav2_navigate_through_poses_action_bt_node,
+       loaded by name at runtime via config/mission_manager.yaml plugin_libs. -->
+  <exec_depend>nav2_behavior_tree</exec_depend>
+  <!-- is_motion_locked_bt_node, loaded by name at runtime via plugin_libs. -->
+  <exec_depend>isaacbot_amr_navigation</exec_depend>
+
+  <test_depend>ament_cmake_gtest</test_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>
