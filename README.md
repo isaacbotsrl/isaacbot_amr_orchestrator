@@ -1,6 +1,6 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="icons/isaacbot-lockup-white-bold.svg">
+    <source media="(prefers-color-scheme: dark)" srcset="icons/isaacbot-lockup-white.svg">
     <img src="icons/isaacbot-lockup-black-bold.svg" alt="IsaacBot" width="240">
   </picture>
 </p>
