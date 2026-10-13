@@ -1,5 +1,8 @@
 <p align="center">
-  <img src="icons/Logo-Arm-WhiteOrange-372x372-1.png" alt="Mechatronics Academy" width="140">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="icons/isaacbot-lockup-white-bold.svg">
+    <img src="icons/isaacbot-lockup-black-bold.svg" alt="IsaacBot" width="240">
+  </picture>
 </p>
 
 # isaacbot_amr_orchestrator
