@@ -7,7 +7,7 @@
 
 # isaacbot_amr_orchestrator
 
-Mechatronics Academy's Ardennes autonomy stack, running on the orchestrator computer.
+IsaacBot's Ardennes autonomy stack, running on the orchestrator computer.
 
 - [`isaacbot_amr_navigation`](isaacbot_amr_navigation/README.md) - Nav 2 configuration, the `IsMotionLocked`
   and `IsLidarHealthy` behavior-tree conditions and the SLAM map autosaver.
@@ -28,8 +28,8 @@ Mechatronics Academy's Ardennes autonomy stack, running on the orchestrator comp
 ### Create workspace
 
 ```bash
-mkdir -p ~/ros2_ws/rover_a1
-cd ~/ros2_ws/rover_a1
+mkdir -p ~/ros2_ws/ardennes
+cd ~/ros2_ws/ardennes
 git clone -b master https://github.com/isaacbotsrl/isaacbot_amr_ros.git src/isaacbot_amr_ros
 git clone -b master https://github.com/isaacbotsrl/isaacbot_amr_orchestrator.git src/isaacbot_amr_orchestrator
 ```
@@ -131,8 +131,8 @@ package READMEs linked above.
 A complete isaacbot is three repositories, one per container:
 
 - [`isaacbot_amr_ros`](https://github.com/isaacbotsrl/isaacbot_amr_ros) - the platform
-  (`rover-a1-platform`).
+  (`ardennes-platform`).
 - [`isaacbot_amr_sensors`](https://github.com/isaacbotsrl/isaacbot_amr_sensors) - the sensor payload,
-  GNSS and lidar drivers (`rover-a1-sensors`).
+  GNSS and lidar drivers (`ardennes-sensors`).
 - [`isaacbot_amr_orchestrator`](https://github.com/isaacbotsrl/isaacbot_amr_orchestrator) - this one, the
-  autonomy stack (`rover-a1-orchestrator`).
+  autonomy stack (`ardennes-orchestrator`).

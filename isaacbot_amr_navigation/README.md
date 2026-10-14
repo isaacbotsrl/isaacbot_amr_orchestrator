@@ -16,7 +16,7 @@ ROS 2 **Lyrical**, with the workspace built and sourced. `isaacbot_amr_navigatio
 `isaacbot_amr_metapackage`, so build it explicitly:
 
 ```bash
-cd ~/ros2_ws/rover_a1
+cd ~/ros2_ws/ardennes
 source /opt/ros/$ROS_DISTRO/setup.bash
 colcon build --symlink-install --packages-select isaacbot_amr_navigation
 source install/setup.bash
@@ -30,7 +30,7 @@ providing:
 | TF `<namespace>/odom -> <namespace>/base_link` | `isaacbot_amr_localization` (EKF) |
 | TF `<namespace>/base_link -> <namespace>/lidar_link` | `isaacbot_amr_description` (URDF / robot_state_publisher) |
 | `odom` (`nav_msgs/Odometry`) | `isaacbot_amr_localization`, remapped from `odometry/filtered` |
-| `<namespace>/scan` (`sensor_msgs/LaserScan`) | `isaacbot_amr_rs16_lidar` on hardware (sensor payload, `rover-a1-sensors`, `ISAACBOT_AMR_SYSTEM_USE_LIDAR=true`), or the Gazebo bridge in simulation |
+| `<namespace>/scan` (`sensor_msgs/LaserScan`) | `isaacbot_amr_rs16_lidar` on hardware (sensor payload, `ardennes-sensors`, `ISAACBOT_AMR_SYSTEM_USE_LIDAR=true`), or the Gazebo bridge in simulation |
 | `<namespace>/diagnostics` (`diagnostic_msgs/DiagnosticArray`) | `isaacbot_amr_rs16_lidar` — watched by the `IsLidarHealthy` BT condition |
 
 Both costmaps mark and clear from the lidar, so without it the local costmap stays empty and
@@ -410,7 +410,7 @@ and wait for it to settle before any test), `AUTOMATIC` drive mode, isaacbot on 
   `isaacbot_amr_rs16_lidar`'s `<namespace>/scan`, a +/-0.25 m slice around the lidar's height, not
   the raw `rslidar_points` cloud. An obstacle entirely below or above that slice is not marked.
 - **The local costmap stays empty and the isaacbot drives into things.** Check, in order:
-  `ros2 topic hz /<ns>/scan` (is `isaacbot_amr_rs16_lidar` up? It runs in `rover-a1-sensors` with
+  `ros2 topic hz /<ns>/scan` (is `isaacbot_amr_rs16_lidar` up? It runs in `ardennes-sensors` with
   `ISAACBOT_AMR_SYSTEM_USE_LIDAR=true`; see `/tmp/isaacbot_amr_sensors.log` there); then the `stvl_layer`'s `min_z`. `min_z`/`max_z`
   are in the **global** frame, not the sensor frame. `lidar_link` sits
   `ISAACBOT_AMR_SYSTEM_MOUNT_LIDAR_Z` above `body_link` and that variable defaults to `0.0`, so a

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 
-# Copyright 2025 Mechatronics Academy
+# Copyright 2025 IsaacBot
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -47,7 +47,7 @@ def generate_launch_description():
     camera_depth_topic = LaunchConfiguration("camera_depth_topic")
     # Local costmap sources: the lidar scan always, the D435i depth cloud only when asked for
     # (use_camera, ISAACBOT_AMR_ORCH_NAV_USE_CAMERA). Not ISAACBOT_AMR_SYSTEM_USE_CAMERA: that only starts the
-    # camera (rover-a1-sensors), which follow-me and perception use without Nav 2 relying on it.
+    # camera (ardennes-sensors), which follow-me and perception use without Nav 2 relying on it.
     use_camera = LaunchConfiguration("use_camera")
     observation_sources = PythonExpression(
         [
@@ -88,7 +88,7 @@ def generate_launch_description():
         default_value="/maps",
         description=(
             "localization_source:=indoor only: where isaacbot_amr_indoor_nav_manager keeps its maps, "
-            "places and last pose (the isaacbot-maps volume in rover-a1-orchestrator)."
+            "places and last pose (the isaacbot-maps volume in ardennes-orchestrator)."
         ),
     )
     declare_namespace_arg = DeclareLaunchArgument(
@@ -113,7 +113,7 @@ def generate_launch_description():
         description=(
             "Add the RealSense depth cloud as a local-costmap observation source "
             "(ISAACBOT_AMR_ORCH_NAV_USE_CAMERA). The camera itself is ISAACBOT_AMR_SYSTEM_USE_CAMERA, in "
-            "rover-a1-sensors."
+            "ardennes-sensors."
         ),
     )
     declare_camera_depth_topic_arg = DeclareLaunchArgument(

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright 2026 Mechatronics Academy
+# Copyright 2026 IsaacBot
 # Licensed under the Apache License, Version 2.0.
 #
 # Simulated Ardennes + orchestrator, AMCL on a saved map (localization_source:=amcl).

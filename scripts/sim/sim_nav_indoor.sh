@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright 2026 Mechatronics Academy
+# Copyright 2026 IsaacBot
 # Licensed under the Apache License, Version 2.0.
 #
 # Simulated Ardennes + orchestrator, isaacbot_amr_indoor_nav_manager switching between slam_toolbox

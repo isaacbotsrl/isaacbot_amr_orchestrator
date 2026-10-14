@@ -9,7 +9,7 @@ smoother, the collision monitor, drive mode (AUTOMATIC only) and the motion lock
 any Nav 2 motion. Nothing here publishes `cmd_vel`.
 
 ```
- rover-a1-sensors                          rover-a1-orchestrator
+ ardennes-sensors                          ardennes-orchestrator
  camera/depth/points ─┐
  odom, TF ────────────┤ fmoc ──tracked_person──▶ follow_me ──follow_me/target_pose──┐
                         (isaacbot_amr_perception)       start/stop, rules   PoseStamped     │
@@ -18,8 +18,8 @@ any Nav 2 motion. Nothing here publishes `cmd_vel`.
                                                                         → collision monitor → drive mode
 ```
 
-It runs in `rover-a1-orchestrator`, next to Nav 2, the mission manager and drive mode it
-coordinates with. `ISAACBOT_AMR_SYSTEM_FOLLOW_ME_ENABLE=true` starts both halves: fmoc in `rover-a1-sensors`,
+It runs in `ardennes-orchestrator`, next to Nav 2, the mission manager and drive mode it
+coordinates with. `ISAACBOT_AMR_SYSTEM_FOLLOW_ME_ENABLE=true` starts both halves: fmoc in `ardennes-sensors`,
 this node in the orchestrator (`rover_docker/README.md`, "Follow-me").
 
 Clean Architecture: `domain/` (start/stop rules) and `application/` (the follow executor and its

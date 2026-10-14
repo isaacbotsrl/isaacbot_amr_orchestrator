@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright 2026 Mechatronics Academy
+# Copyright 2026 IsaacBot
 # Licensed under the Apache License, Version 2.0.
 #
 # Simulated Ardennes + orchestrator, Nav 2 on odometry only (localization_source:=odom):

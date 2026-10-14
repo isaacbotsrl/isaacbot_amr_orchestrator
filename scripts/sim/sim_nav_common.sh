@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright 2026 Mechatronics Academy
+# Copyright 2026 IsaacBot
 # Licensed under the Apache License, Version 2.0.
 #
 # Shared by sim_nav_{odom,amcl,slam,indoor}.sh; not meant to be run on its own.

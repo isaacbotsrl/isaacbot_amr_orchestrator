@@ -89,7 +89,7 @@ imports ROS or an outer layer.
 | Name | Default | |
 |------|---------|--|
 | `localization_params_file` | *(required)* | bringup's namespaced `isaacbot_amr_nav_params.yaml` |
-| `maps_dir` | `/maps` | The `isaacbot-maps` volume in rover-a1-orchestrator |
+| `maps_dir` | `/maps` | The `isaacbot-maps` volume in ardennes-orchestrator |
 | `save_map_timeout` | `5.0` | s, map_saver |
 | `load_map_timeout` | `5.0` | s, map_server `load_map` (in-place map switch) |
 | `zenoh_client_mode` | `true` | Run the child launch as Zenoh clients (rmw_zenoh only) |

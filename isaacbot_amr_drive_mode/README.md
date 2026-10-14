@@ -127,7 +127,7 @@ ros2 launch isaacbot_amr_drive_mode isaacbot_amr_drive_mode.launch.py namespace:
 | `use_teleop_guard` | `True` | `False` skips the teleop collision monitor; ASSISTED is then refused |
 | `use_sim_time` | `False` | `True` in Gazebo |
 
-In `rover_docker` it runs in `rover-a1-orchestrator` whenever `ISAACBOT_AMR_ORCH_DRIVE_MODE=true`
+In `rover_docker` it runs in `ardennes-orchestrator` whenever `ISAACBOT_AMR_ORCH_DRIVE_MODE=true`
 (default), independent of `ISAACBOT_AMR_ORCH_NAVIGATION`: without it the drive UI cannot drive.
 
 ```bash

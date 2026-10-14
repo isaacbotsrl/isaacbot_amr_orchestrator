@@ -11,7 +11,7 @@ builds nothing itself; it exists so the whole stack can be built and installed w
 | [`isaacbot_amr_follow_me`](../isaacbot_amr_follow_me/README.md) | Follow-me: a person tracked by `isaacbot_amr_perception` followed through Nav 2's Following server, started and stopped by `follow_me/start` / `follow_me/stop`. |
 
 ```bash
-cd ~/ros2_ws/rover_a1
+cd ~/ros2_ws/ardennes
 source /opt/ros/$ROS_DISTRO/setup.bash
 colcon build --symlink-install --packages-up-to isaacbot_amr_autonomy
 source install/setup.bash
