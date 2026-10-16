@@ -8,7 +8,7 @@
     automatic Nav 2 GoTo): the mode manager that routes web teleop and Nav 2 commands, and the
     teleop collision monitor that guards assisted driving.
   </description>
-  <maintainer email="potlogradu@gmail.com">root</maintainer>
+  <maintainer email="potlogradu@gmail.com">radupotlog</maintainer>
   <license>Apache License 2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

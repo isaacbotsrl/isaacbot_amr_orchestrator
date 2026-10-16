@@ -6,7 +6,7 @@
   <description>
     Behavior-tree-driven mission supervision for the Ardennes orchestrator computer.
   </description>
-  <maintainer email="potlogradu@gmail.com">root</maintainer>
+  <maintainer email="potlogradu@gmail.com">radupotlog</maintainer>
   <license>Apache License 2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>

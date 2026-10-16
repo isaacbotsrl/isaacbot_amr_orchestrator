@@ -4,7 +4,7 @@
   <name>isaacbot_amr_navigation</name>
   <version>1.0.0</version>
   <description>The package contains the nav2 package configurations of the isaacbot</description>
-  <maintainer email="potlogradu@gmail.com">root</maintainer>
+  <maintainer email="potlogradu@gmail.com">radupotlog</maintainer>
   <license>Apache License 2.0</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
