@@ -14,8 +14,8 @@ IsaacBot's Ardennes autonomy stack, running on the orchestrator computer.
 - [`isaacbot_amr_mission_manager`](isaacbot_amr_mission_manager/README.md) - behavior-tree mission
   supervision on top of Nav 2.
 - [`isaacbot_amr_indoor_nav_manager`](isaacbot_amr_indoor_nav_manager/README.md) - indoor map library,
-  places and runtime SLAM ↔ AMCL switching (`localization_source:=indoor`) for the
-  isaacbot_amr_drive_interface web UI.
+  places and automatic SLAM ↔ AMCL ↔ odometry switching (always started by
+  `isaacbot_amr_navigation`'s bringup) for the isaacbot_amr_drive_interface web UI.
 - [`isaacbot_amr_drive_mode`](isaacbot_amr_drive_mode/README.md) - the driving modes (Manual, Assisted with
   lidar slow-down/stop, Automatic): routes the web UI's joystick and Nav 2's commands to the
   platform according to the mode.
@@ -64,20 +64,21 @@ source install/setup.bash
 
 #### Simulated isaacbot:
 
-One script per localization source starts everything, in order and each part only once the
+`sim_nav_indoor.sh` starts everything, in order and each part only once the
 previous one is up: a local Zenoh router, `isaacbot_amr_gazebo` (simulator, URDF, RViz, ros2_control,
 EKF, twist_mux + motion_lock), `isaacbot_amr_navigation`, `isaacbot_amr_drive_mode` and `isaacbot_amr_mission_manager`.
 It then switches the drive mode to AUTOMATIC, so Nav 2 goals (RViz "Nav2 Goal") drive the isaacbot.
 One Ctrl+C stops everything, last-started first.
 
 ```bash
-src/isaacbot_amr_orchestrator/scripts/sim/sim_nav_odom.sh     # odometry only, no map
-src/isaacbot_amr_orchestrator/scripts/sim/sim_nav_slam.sh     # slam_toolbox; autosaves ~/isaacbot_amr_sim_maps/slam/map.yaml
-src/isaacbot_amr_orchestrator/scripts/sim/sim_nav_amcl.sh     # AMCL on that map (or: sim_nav_amcl.sh <map.yaml>)
-src/isaacbot_amr_orchestrator/scripts/sim/sim_nav_indoor.sh   # isaacbot_amr_indoor_nav_manager, maps in ~/isaacbot_amr_sim_maps/indoor
+src/isaacbot_amr_orchestrator/scripts/sim/sim_nav_indoor.sh   # maps in ~/isaacbot_amr_sim_maps/indoor
 ```
 
-- Logs: one file per part under `~/.ros/isaacbot_amr_sim/<mode>-<time>/`; on failure the script prints
+Localization is automatic (`isaacbot_amr_indoor_nav_manager`): SLAM while no saved map is
+selected, AMCL on the selected map, and odometry (map -> odom held) while no lidar or camera
+scan arrives. The Gazebo world has no `camera/scan`, so only the lidar is watched there.
+
+- Logs: one file per part under `~/.ros/isaacbot_amr_sim/nav-<time>/`; on failure the script prints
   the tail of the part that died.
 - Every process runs as a Zenoh **client** of the local router (`tcp/localhost:7447`), whatever
   `ZENOH_CONFIG_OVERRIDE` says, so the simulated `/isaacbot` never joins the real isaacbot's router.
@@ -101,18 +102,14 @@ ros2 launch isaacbot_amr_bringup isaacbot_amr_bringup.launch.py
 ros2 launch isaacbot_amr_sensors_bringup isaacbot_amr_sensors.launch.py use_lidar:=true
 
 # on the isaacbot or on the orchestrator computer: navigation
-ros2 launch isaacbot_amr_navigation bringup.launch.py \
-  use_sim_time:=False \
-  localization_source:=gps \
-  map:=$(ros2 pkg prefix isaacbot_amr_navigation)/share/isaacbot_amr_navigation/map/empty_world.yaml
+ros2 launch isaacbot_amr_navigation bringup.launch.py use_sim_time:=False
 ```
 
 #### Mission manager:
 
 ```bash
-# localization_source must match what isaacbot_amr_navigation was launched with
+# goals are in <namespace>/map, Nav 2's global frame
 ros2 launch isaacbot_amr_mission_manager isaacbot_amr_mission_manager.launch.py \
-  localization_source:=gps \
   namespace:=isaacbot
 ```
 
@@ -123,7 +120,7 @@ colcon test --packages-select isaacbot_amr_navigation isaacbot_amr_mission_manag
 colcon test-result --all
 ```
 
-Launch arguments, parameters, localization sources and troubleshooting are documented in the
+Launch arguments, parameters, localization and troubleshooting are documented in the
 package READMEs linked above.
 
 ## Related repositories

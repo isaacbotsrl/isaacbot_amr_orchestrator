@@ -21,6 +21,8 @@ import uuid
 from dataclasses import dataclass, field, replace
 from typing import Optional
 
+from .sensors import ScanSource
+
 MAP_NAME_PATTERN = re.compile(r'^[A-Za-z0-9_-]{1,64}$')
 MAX_PLACE_NAME = 64
 
@@ -91,6 +93,7 @@ class SeedSource(enum.Enum):
     EXPLICIT = 'explicit'    # the operator gave the pose (LoadMap with set_initial_pose)
     LAST_POSE = 'last_pose'  # last_pose.yaml, e.g. after a reboot: may be stale or moved
     ORIGIN = 'origin'        # nothing known: the map origin
+    ODOMETRY = 'odometry'    # dead-reckoned while no range sensor worked: drifted
 
 
 class LocalizationMode(enum.Enum):
@@ -98,6 +101,9 @@ class LocalizationMode(enum.Enum):
     MAPPING = 1
     LOCALIZATION = 2
     SWITCHING = 3
+    # No lidar or camera: SLAM/AMCL get no scan, so the manager holds map -> odom and the
+    # isaacbot dead-reckons on odometry until a sensor is back.
+    ODOMETRY = 4
 
 
 @dataclass(frozen=True)
@@ -105,6 +111,7 @@ class LocalizationState:
     mode: LocalizationMode = LocalizationMode.UNAVAILABLE
     map_name: str = ''
     message: str = ''
+    scan_source: ScanSource = ScanSource.NONE
 
     def with_(self, **changes) -> 'LocalizationState':
         return replace(self, **changes)

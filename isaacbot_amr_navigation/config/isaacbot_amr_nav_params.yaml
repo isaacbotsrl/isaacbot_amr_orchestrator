@@ -617,10 +617,9 @@
 
   ### LOCALIZATION ###
 
-  # Only used when bringup.launch.py is started with localization_source:=amcl. AMCL then
-  # owns <namespace>/map -> <namespace>/odom, so ISAACBOT_AMR_SYSTEM_USE_GPS must be off (or
-  # ISAACBOT_AMR_SYSTEM_GPS_MAP_TF=false) and slam_toolbox must not run: all three publish that
-  # same transform, and two owners fight rather than error.
+  # Started by isaacbot_amr_indoor_nav_manager on a saved map. AMCL then owns
+  # <namespace>/map -> <namespace>/odom; the manager never runs slam_toolbox at the same time
+  # and only holds the transform itself while no lidar or camera scan reaches AMCL.
   amcl:
     ros__parameters:
       use_sim_time: false
@@ -634,14 +633,15 @@
       # either way.
       base_frame_id: <namespace>/base_link
 
-      scan_topic: <observation_topic>
+      # The manager relays the lidar scan here, or the camera's (camera/scan) when the lidar
+      # is lost; the costmaps keep reading <observation_topic> directly.
+      scan_topic: localization/scan
       # Relative on purpose: resolves to /<namespace>/map inside the pushed namespace, the
       # same latched topic global_costmap's static_layer subscribes to.
       map_topic: map
-      # false: in localization_source:=indoor, isaacbot_amr_indoor_nav_manager switches saved maps by
-      # asking map_server to load another one, which republishes `map`; with true AMCL would
-      # keep localizing on the old map. With amcl the map is never republished, so this costs
-      # nothing there. A new map only replaces AMCL's map; the manager re-seeds the pose.
+      # false: isaacbot_amr_indoor_nav_manager switches saved maps by asking map_server to load
+      # another one, which republishes `map`; with true AMCL would keep localizing on the old
+      # map. A new map only replaces AMCL's map; the manager re-seeds the pose.
       first_map_only: false
 
       robot_model_type: nav2_amcl::DifferentialMotionModel
@@ -732,9 +732,8 @@
       map_directory: /maps/map
 
   ### SLAM ###
-  # Only used when bringup.launch.py is started with localization_source:=slam. slam_toolbox
-  # then owns <namespace>/map -> <namespace>/odom, so ISAACBOT_AMR_SYSTEM_USE_GPS must be off: the
-  # global EKF (isaacbot_amr_ekf_global_node) publishes the same transform.
+  # Started by isaacbot_amr_indoor_nav_manager while no map is selected. slam_toolbox then
+  # owns <namespace>/map -> <namespace>/odom (the manager holds it while no scan arrives).
 
   map_saver:
     ros__parameters:
@@ -760,7 +759,8 @@
       odom_frame: <namespace>/odom
       map_frame: <namespace>/map
       base_frame: <namespace>/base_link
-      scan_topic: <observation_topic>
+      # Lidar or camera, relayed by the manager (see amcl.scan_topic).
+      scan_topic: localization/scan
       mode: mapping
 
       debug_logging: false

@@ -18,6 +18,7 @@ from isaacbot_amr_indoor_nav_manager.domain.model import MapRecord
 from isaacbot_amr_indoor_nav_manager.domain.ports import (
     IndoorNavObserver,
     LocalizationController,
+    MapOdomHold,
     MapRepository,
     MapSaver,
     RobotPoseSource,
@@ -102,6 +103,23 @@ class FakeLocalization(LocalizationController):
 
     def running(self):
         return self.alive
+
+
+class FakeHold(MapOdomHold):
+    def __init__(self):
+        self.calls = []
+        self.held = False
+
+    def hold(self, robot_in_map=None):
+        self.calls.append(('hold', robot_in_map))
+        self.held = True
+
+    def release(self):
+        self.calls.append(('release',))
+        self.held = False
+
+    def holding(self):
+        return self.held
 
 
 class FakeSaver(MapSaver):

@@ -20,7 +20,6 @@ from launch.substitutions import (
     EnvironmentVariable,
     LaunchConfiguration,
     PathJoinSubstitution,
-    PythonExpression,
 )
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
@@ -65,36 +64,11 @@ def generate_launch_description():
         description="Parameter file for the mission manager.",
     )
 
-    localization_source = LaunchConfiguration("localization_source")
-    declare_localization_source_arg = DeclareLaunchArgument(
-        "localization_source",
-        default_value="odom",
-        description=(
-            "Must match the value isaacbot_amr_navigation was launched with: it decides which frame "
-            "mission waypoints are expressed in (<namespace>/odom, or <namespace>/map for "
-            "gps, slam, amcl and indoor)."
-        ),
-        choices=["odom", "gps", "slam", "amcl", "indoor"],
-    )
-
     use_sim_time = LaunchConfiguration("use_sim_time")
     declare_use_sim_time_arg = DeclareLaunchArgument(
         "use_sim_time",
         default_value="False",
         description="Use simulation (Gazebo) clock if true.",
-    )
-
-    namespace_ext = PythonExpression(
-        ["'", namespace, "' + '/' if '", namespace, "' else ''"]
-    )
-    goal_frame_id = PythonExpression(
-        [
-            "'",
-            namespace_ext,
-            "' + ('odom' if '",
-            localization_source,
-            "' == 'odom' else 'map')",
-        ]
     )
 
     mission_manager_node = Node(
@@ -106,7 +80,6 @@ def generate_launch_description():
             params_file,
             {
                 "bt_project_path": bt_project_path,
-                "goal_frame_id": goal_frame_id,
                 "use_sim_time": use_sim_time,
             },
         ],
@@ -117,7 +90,6 @@ def generate_launch_description():
     return LaunchDescription(
         [
             declare_bt_project_path_arg,
-            declare_localization_source_arg,
             declare_log_level_arg,
             declare_namespace_arg,
             declare_params_file_arg,

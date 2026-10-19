@@ -2,9 +2,9 @@
 # Copyright 2026 IsaacBot
 # Licensed under the Apache License, Version 2.0.
 #
-# Shared by sim_nav_{odom,amcl,slam,indoor}.sh; not meant to be run on its own.
+# Shared by sim_nav_indoor.sh; not meant to be run on its own.
 #
-# Starts the simulated Ardennes and the orchestrator stack for one localization source, in
+# Starts the simulated Ardennes and the orchestrator stack, in
 # order, each one only once the previous one is up:
 #   Zenoh router -> isaacbot_amr_gazebo simulation -> isaacbot_amr_navigation bringup -> isaacbot_amr_drive_mode
 #   -> isaacbot_amr_mission_manager -> drive mode AUTOMATIC
@@ -169,10 +169,10 @@ set_automatic() {
   return 1
 }
 
-# run_stack <localization_source> [extra bringup.launch.py arguments...]
+# run_stack [extra bringup.launch.py arguments...]
+# Localization is automatic (isaacbot_amr_indoor_nav_manager): SLAM with no saved map selected,
+# AMCL on the selected one, odometry while no lidar or camera scan arrives.
 run_stack() {
-  local localization="$1"
-  shift
   local nav_args=("$@")
 
   # Anchored to the process itself, so a shell whose command line merely mentions these names
@@ -196,16 +196,16 @@ $(pgrep -af "$running_re")"
   # afterwards can reach Nav 2's services or actions.
   export ZENOH_CONFIG_OVERRIDE="$SIM_ZENOH_CONFIG"
   export ISAACBOT_AMR_SYSTEM_NAMESPACE="$NS"
-  # Only 'gps' mode wants the global EKF; every mode here owns map -> odom itself.
-  export ISAACBOT_AMR_SYSTEM_USE_GPS=false ISAACBOT_AMR_SYSTEM_GPS_MAP_TF=false
+  # No GPS in the simulated isaacbot; the indoor nav manager owns map -> odom.
+  export ISAACBOT_AMR_SYSTEM_USE_GPS=false
   # A ros2 daemon started from a shell with a different Zenoh config answers stale graphs.
   ros2 daemon stop > /dev/null 2>&1
 
-  LOG_DIR="${ISAACBOT_AMR_SIM_LOG_DIR:-$HOME/.ros/isaacbot_amr_sim}/${localization}-$(date +%Y%m%d-%H%M%S)"
+  LOG_DIR="${ISAACBOT_AMR_SIM_LOG_DIR:-$HOME/.ros/isaacbot_amr_sim}/nav-$(date +%Y%m%d-%H%M%S)"
   mkdir -p "$LOG_DIR" "$MAPS_DIR" || die "cannot create $LOG_DIR or $MAPS_DIR"
 
   # Simulation copy of the Nav 2 parameters:
-  # - The SLAM map autosaver writes to /maps/map on the isaacbot; point it at $MAPS_DIR.
+  # - AMCL's pose autosave writes to /maps/map on the isaacbot; point it at $MAPS_DIR.
   # - The rotation shim turns at 1.0 rad/s on the isaacbot (skid-steer static friction). The
   #   simulated wheels have none, and the shim does not brake before handing over to MPPI; at 1.5
   #   MPPI inherited a spin it could not absorb (overshoot up to 60 deg, back and forth in place).
@@ -222,7 +222,7 @@ $(pgrep -af "$running_re")"
   trap cleanup EXIT
   trap 'exit 130' INT TERM
 
-  log "localization_source=$localization, namespace=/$NS, logs in $LOG_DIR"
+  log "namespace=/$NS, logs in $LOG_DIR"
 
   if router_listening; then
     log "Zenoh router already listening on :7447, using it"
@@ -240,7 +240,7 @@ $(pgrep -af "$running_re")"
     topic_has_message "/$NS/joint_states"
 
   start_bg navigation ros2 launch isaacbot_amr_navigation bringup.launch.py \
-    namespace:="$NS" use_sim_time:=True localization_source:="$localization" \
+    namespace:="$NS" use_sim_time:=True \
     params_file:="$params" "${nav_args[@]}"
   wait_for "Nav 2 (all navigation nodes active)" \
     lifecycle_manager_active "/$NS/lifecycle_manager_navigation"
@@ -250,12 +250,12 @@ $(pgrep -af "$running_re")"
   wait_for "drive mode manager" service_available "/$NS/set_drive_mode"
 
   start_bg mission_manager ros2 launch isaacbot_amr_mission_manager isaacbot_amr_mission_manager.launch.py \
-    namespace:="$NS" localization_source:="$localization" use_sim_time:=True
+    namespace:="$NS" use_sim_time:=True
   wait_for "mission manager" service_available "/$NS/set_mission"
 
   wait_for "drive mode AUTOMATIC" set_automatic
 
-  log "all up (localization_source=$localization). Send goals with 'Nav2 Goal' in RViz."
+  log "all up. Send goals with 'Nav2 Goal' in RViz."
   log "follow a part: tail -f $LOG_DIR/<router|simulation|navigation|drive_mode|mission_manager>.log"
   log "other terminals (ros2 CLI, ...): export ZENOH_CONFIG_OVERRIDE='$SIM_ZENOH_CONFIG'"
   log "Ctrl+C stops everything."

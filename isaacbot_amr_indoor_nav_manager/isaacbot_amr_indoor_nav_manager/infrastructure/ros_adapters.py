@@ -31,6 +31,7 @@ import tf2_ros
 
 from ..domain.model import LocalizationMode, LocalizationState, Pose2D
 from ..domain.ports import IndoorNavObserver, MapSaver, RobotPoseSource
+from ..domain.sensors import ScanSource
 
 LATCHED = QoSProfile(depth=1, reliability=ReliabilityPolicy.RELIABLE,
                      durability=DurabilityPolicy.TRANSIENT_LOCAL)
@@ -91,7 +92,7 @@ class RosMapLoader:
 class TfPoseSource(RobotPoseSource):
 
     def __init__(self, node: Node, map_frame: str, base_frame: str):
-        self._buffer = tf2_ros.Buffer()
+        self.buffer = self._buffer = tf2_ros.Buffer()
         self._listener = tf2_ros.TransformListener(self._buffer, node)
         self._map_frame = map_frame
         self._base_frame = base_frame
@@ -112,6 +113,13 @@ _MODE = {
     LocalizationMode.MAPPING: LocalizationStateMsg.MAPPING,
     LocalizationMode.LOCALIZATION: LocalizationStateMsg.LOCALIZATION,
     LocalizationMode.SWITCHING: LocalizationStateMsg.SWITCHING,
+    LocalizationMode.ODOMETRY: LocalizationStateMsg.ODOMETRY,
+}
+
+_SCAN = {
+    ScanSource.NONE: LocalizationStateMsg.SCAN_NONE,
+    ScanSource.LIDAR: LocalizationStateMsg.SCAN_LIDAR,
+    ScanSource.CAMERA: LocalizationStateMsg.SCAN_CAMERA,
 }
 
 
@@ -134,11 +142,13 @@ class RosObserver(IndoorNavObserver):
 
     def on_state(self, state: LocalizationState) -> None:
         self._node.get_logger().info(
-            f'Localization: {state.mode.name} map={state.map_name or "-"} {state.message}')
+            f'Localization: {state.mode.name} map={state.map_name or "-"} '
+            f'scan={state.scan_source.name} {state.message}')
         if not self._live():
             return
         msg = LocalizationStateMsg(mode=_MODE[state.mode], map_name=state.map_name,
-                                   message=state.message)
+                                   message=state.message,
+                                   scan_source=_SCAN[state.scan_source])
         msg.header.stamp = self._stamp()
         self._state_pub.publish(msg)
 

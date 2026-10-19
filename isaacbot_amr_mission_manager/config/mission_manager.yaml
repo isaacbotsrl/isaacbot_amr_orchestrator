@@ -48,8 +48,7 @@
 
       navigate_to_pose_action: navigate_to_pose
 
-      # Empty means "derive <namespace>/odom". Set to <namespace>/map when isaacbot_amr_navigation
-      # runs with localization_source:=gps or :=slam.
+      # Empty means "derive <namespace>/map", Nav 2's global frame.
       goal_frame_id: ""
 
       mission_status_topic: mission_status

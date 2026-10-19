@@ -42,7 +42,6 @@ def generate_launch_description():
     container_name_full = (namespace, "/", container_name)
     use_respawn = LaunchConfiguration("use_respawn")
     log_level = LaunchConfiguration("log_level")
-    localization_source = LaunchConfiguration("localization_source")
     initial_pose_x = LaunchConfiguration("initial_pose_x")
     initial_pose_y = LaunchConfiguration("initial_pose_y")
     initial_pose_yaw = LaunchConfiguration("initial_pose_yaw")
@@ -103,57 +102,33 @@ def generate_launch_description():
         "log_level", default_value="info", description="log level"
     )
 
-    # Kept identical to bringup.launch.py's and isaacbot_amr_mission_manager's lists on purpose --
-    # test/launch/test_localization_launch.py asserts all three match, because a silent
-    # divergence between them is a field bug rather than a startup error. 'slam' is never
-    # routed here (bringup includes slam_launch.py instead) but stays in the list for that.
-    # 'indoor' reaches here only through indoor_localization.launch.py, which
-    # isaacbot_amr_indoor_nav_manager runs when it switches to a saved map: it means AMCL too.
-    declare_localization_source_cmd = DeclareLaunchArgument(
-        "localization_source",
-        default_value="odom",
-        description=(
-            "Only 'amcl' and 'indoor' start nav2_amcl; every other value brings up map_server "
-            "alone. "
-            "See bringup.launch.py for what each value means."
-        ),
-        choices=["odom", "gps", "slam", "amcl", "indoor"],
-    )
-
     declare_initial_pose_x_cmd = DeclareLaunchArgument(
         "initial_pose_x",
         default_value="0.0",
-        description="X of AMCL's startup pose in <namespace>/map. Only used with amcl.",
+        description="X of AMCL's startup pose in <namespace>/map.",
     )
 
     declare_initial_pose_y_cmd = DeclareLaunchArgument(
         "initial_pose_y",
         default_value="0.0",
-        description="Y of AMCL's startup pose in <namespace>/map. Only used with amcl.",
+        description="Y of AMCL's startup pose in <namespace>/map.",
     )
 
     declare_initial_pose_yaw_cmd = DeclareLaunchArgument(
         "initial_pose_yaw",
         default_value="0.0",
-        description="Yaw (rad) of AMCL's startup pose. Only used with amcl.",
+        description="Yaw (rad) of AMCL's startup pose.",
     )
 
     def localization_setup(context, *args, **kwargs):
-        """Build the localization nodes once localization_source is known.
+        """Build map_server + AMCL with the initial pose resolved to floats.
 
-        This is an OpaqueFunction rather than plain declarative actions because
-        lifecycle_manager's `node_names` is a string_array whose *element count* has to
-        vary with the mode, and no substitution can do that: PythonExpression always
-        evaluates to a str, which the parameter declaration rejects, and ParameterValue
-        builds one array element per substitution, so it cannot add or drop one.
-        ComposableNode has no `condition` argument either. Resolving the configuration
-        here turns both problems back into ordinary Python.
+        An OpaqueFunction because AMCL declares initial_pose.* as doubles and a launch
+        substitution would hand it strings.
         """
-        amcl_enabled = context.perform_substitution(localization_source) in ("amcl", "indoor")
-
         # map_server first: lifecycle_manager transitions in list order, and AMCL blocks
         # waiting for the map, so activating the publisher first avoids a startup stall.
-        lifecycle_nodes = ["map_server"] + (["amcl"] if amcl_enabled else [])
+        lifecycle_nodes = ["map_server", "amcl"]
 
         # Dotted keys override the nested initial_pose block in isaacbot_amr_nav_params.yaml.
         # Resolved to floats here because AMCL declares them as doubles and a launch
@@ -164,11 +139,10 @@ def generate_launch_description():
             "initial_pose.yaw": float(context.perform_substitution(initial_pose_yaw)),
         }
 
-        # AMCL runs only with localization_source:=amcl, and is then the sole owner of
-        # <namespace>/map -> <namespace>/odom. isaacbot_amr_ekf_global_node (isaacbot_amr_localization)
-        # publishes that same transform when ISAACBOT_AMR_SYSTEM_GPS_MAP_TF=true, and
-        # slam_toolbox when localization_source:=slam. Exactly one of the three may run --
-        # two owners do not error, they fight, and the pose visibly jitters between them.
+        # AMCL is the sole owner of <namespace>/map -> <namespace>/odom while this runs:
+        # isaacbot_amr_indoor_nav_manager never runs slam_toolbox alongside, and only holds the
+        # transform itself while no scan reaches AMCL. Two owners do not error, they fight,
+        # and the pose visibly jitters between them.
         plain_nodes = [
             Node(
                 package="nav2_map_server",
@@ -180,20 +154,17 @@ def generate_launch_description():
                 parameters=[configured_params],
                 arguments=["--ros-args", "--log-level", log_level],
             ),
+            Node(
+                package="nav2_amcl",
+                executable="amcl",
+                name="amcl",
+                output="screen",
+                respawn=use_respawn,
+                respawn_delay=2.0,
+                parameters=[configured_params, amcl_overrides],
+                arguments=["--ros-args", "--log-level", log_level],
+            ),
         ]
-        if amcl_enabled:
-            plain_nodes.append(
-                Node(
-                    package="nav2_amcl",
-                    executable="amcl",
-                    name="amcl",
-                    output="screen",
-                    respawn=use_respawn,
-                    respawn_delay=2.0,
-                    parameters=[configured_params, amcl_overrides],
-                    arguments=["--ros-args", "--log-level", log_level],
-                )
-            )
         plain_nodes.append(
             Node(
                 package="nav2_lifecycle_manager",
@@ -217,15 +188,14 @@ def generate_launch_description():
                 parameters=[configured_params],
             ),
         ]
-        if amcl_enabled:
-            composable_nodes.append(
-                ComposableNode(
-                    package="nav2_amcl",
-                    plugin="nav2_amcl::AmclNode",
-                    name="amcl",
-                    parameters=[configured_params, amcl_overrides],
-                )
+        composable_nodes.append(
+            ComposableNode(
+                package="nav2_amcl",
+                plugin="nav2_amcl::AmclNode",
+                name="amcl",
+                parameters=[configured_params, amcl_overrides],
             )
+        )
         composable_nodes.append(
             ComposableNode(
                 package="nav2_lifecycle_manager",
@@ -269,7 +239,6 @@ def generate_launch_description():
     ld.add_action(declare_container_name_cmd)
     ld.add_action(declare_use_respawn_cmd)
     ld.add_action(declare_log_level_cmd)
-    ld.add_action(declare_localization_source_cmd)
     ld.add_action(declare_initial_pose_x_cmd)
     ld.add_action(declare_initial_pose_y_cmd)
     ld.add_action(declare_initial_pose_yaw_cmd)

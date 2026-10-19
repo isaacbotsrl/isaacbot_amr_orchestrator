@@ -62,12 +62,13 @@ std::string MissionManagerNode::resolveGoalFrameId() const
     std::string ns = this->get_namespace();
 
     // get_namespace() is "/" at the root and "/isaacbot" otherwise. Strip the leading slash:
-    // Nav 2 frame ids are "isaacbot/odom", not "/isaacbot/odom".
+    // Nav 2 frame ids are "isaacbot/map", not "/isaacbot/map". Nav 2's global frame is always
+    // <namespace>/map (isaacbot_amr_indoor_nav_manager owns or holds map -> odom).
     if (!ns.empty() && ns.front() == '/') {
         ns.erase(0, 1);
     }
 
-    return ns.empty() ? "odom" : ns + "/odom";
+    return ns.empty() ? "map" : ns + "/map";
 }
 
 void MissionManagerNode::initialize()

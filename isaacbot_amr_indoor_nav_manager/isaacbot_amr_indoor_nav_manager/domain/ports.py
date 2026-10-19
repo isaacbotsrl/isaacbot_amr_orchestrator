@@ -103,6 +103,28 @@ class LocalizationController(ABC):
         """False once the sub-stack exited on its own (crash)."""
 
 
+class MapOdomHold(ABC):
+    """Keeps map -> odom alive while SLAM/AMCL cannot (no scan reaches them).
+
+    Both stamp map -> odom with their last scan, so without a scan the transform goes stale and
+    Nav 2 loses its global frame. While held, the transform is re-published with fresh stamps,
+    and the isaacbot moves in the map on odometry alone.
+    """
+
+    @abstractmethod
+    def hold(self, robot_in_map: Optional[Pose2D] = None) -> None:
+        """Start holding. With `robot_in_map`, map -> odom is set so that the isaacbot is there
+        (cold start on a saved map); without it, the current map -> odom is kept, or identity
+        when there is none yet."""
+
+    @abstractmethod
+    def release(self) -> None:
+        """Hand map -> odom back: stop once SLAM/AMCL publish it again (or after a timeout)."""
+
+    @abstractmethod
+    def holding(self) -> bool: ...
+
+
 class MapSaver(ABC):
     """Writes the map currently being built (nav2 map_saver)."""
 

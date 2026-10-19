@@ -15,13 +15,13 @@
 # limitations under the License.
 
 """
-The swappable half of localization_source:=indoor.
+The swappable half of localization: whichever sub-stack isaacbot_amr_indoor_nav_manager picks.
 
 isaacbot_amr_indoor_nav_manager runs this as a child process and replaces it whenever the
 operator starts mapping or loads a saved map:
 
 - mode:=mapping       slam_toolbox + map_saver (slam_launch.py)
-- mode:=localization  map_server + AMCL on `map` (localization.launch.py, AMCL enabled)
+- mode:=localization  map_server + AMCL on `map` (localization.launch.py)
 
 Both publish <namespace>/map -> <namespace>/odom, so the manager stops one before starting
 the other. Nav 2 itself (bringup.launch.py's nav2_container) keeps running throughout.
@@ -89,7 +89,6 @@ def generate_launch_description():
             "initial_pose_x": LaunchConfiguration("initial_pose_x"),
             "initial_pose_y": LaunchConfiguration("initial_pose_y"),
             "initial_pose_yaw": LaunchConfiguration("initial_pose_yaw"),
-            "localization_source": "indoor",
             "log_level": log_level,
             "map": map_yaml,
             "namespace": namespace,

@@ -17,12 +17,9 @@
 """
 Online SLAM for the isaacbot: slam_toolbox plus a map_saver_server to persist the result.
 
-Started by bringup.launch.py in place of localization.launch.py when
-`localization_source:=slam`. In this mode slam_toolbox publishes
-<namespace>/map -> <namespace>/odom, so it must not run alongside the GPS global EKF
-(isaacbot_amr_ekf_global_node, enabled by ISAACBOT_AMR_SYSTEM_USE_GPS) or AMCL -- all three publish that
-same transform and would fight over it. GPS fusion can stay on if the global EKF's TF is
-off (ISAACBOT_AMR_SYSTEM_GPS_MAP_TF=false / publish_global_tf:=false).
+Started by isaacbot_amr_indoor_nav_manager (through indoor_localization.launch.py) while no
+map is selected. slam_toolbox then publishes <namespace>/map -> <namespace>/odom, so it
+never runs alongside AMCL; the GPS global EKF never publishes that transform.
 """
 
 from launch import LaunchDescription

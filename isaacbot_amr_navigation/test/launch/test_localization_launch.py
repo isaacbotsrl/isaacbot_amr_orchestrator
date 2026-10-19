@@ -14,20 +14,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Introspection tests for localization_source routing.
+"""Introspection tests for localization routing.
 
 These build the LaunchDescriptions and inspect them; nothing is spawned, so the test
 needs no ROS graph and no nav2 binaries.
 
-Two things are worth locking down here:
+There is one localization mode: bringup always starts isaacbot_amr_indoor_nav_manager, which
+runs slam_toolbox or map_server + AMCL (indoor_localization.launch.py) and holds map -> odom
+itself while no lidar or camera works. What is locked down here:
 
-1. `localization_source` is declared in three launch files that must agree by hand
-   (bringup, localization, isaacbot_amr_mission_manager). A divergence between them does not
-   fail at startup -- it fails in the field, as goals stamped in a frame Nav 2 is not
-   planning in. test_choices_are_identical turns that into a build failure.
-2. AMCL must appear only for localization_source:=amcl, and must be in
-   lifecycle_manager's node_names when it does, otherwise it is launched but never
-   configured and never publishes map -> odom.
+1. No launch file still takes `localization_source`: a leftover argument would accept a value
+   and silently ignore it.
+2. localization.launch.py starts AMCL and has lifecycle_manager manage it after map_server,
+   otherwise AMCL is launched but never configured and never publishes map -> odom.
+3. bringup starts the manager and Nav 2, and none of the fixed-mode localization.
 """
 
 import importlib.util
@@ -44,9 +44,6 @@ _MISSION_LAUNCH = os.path.join(
     _NAV_SHARE, "..", "isaacbot_amr_mission_manager", "launch", "isaacbot_amr_mission_manager.launch.py"
 )
 
-MODES = ["odom", "gps", "slam", "amcl", "indoor"]
-# Modes that bring up AMCL when localization.launch.py runs.
-AMCL_MODES = ("amcl", "indoor")
 
 def _load(path, name):
     spec = importlib.util.spec_from_file_location(name, path)
@@ -54,8 +51,10 @@ def _load(path, name):
     spec.loader.exec_module(module)
     return module
 
+
 def _nav_launch(name):
     return _load(os.path.join(_NAV_SHARE, "launch", name), name.replace(".", "_"))
+
 
 def _perform(context, value):
     """Resolve a name that may be a plain str or a list of substitutions.
@@ -67,14 +66,13 @@ def _perform(context, value):
         return value
     return "".join(context.perform_substitution(s) for s in value)
 
-def _declared_choices(launch_description, arg_name="localization_source"):
-    for entity in launch_description.entities:
-        if isinstance(entity, DeclareLaunchArgument) and entity.name == arg_name:
-            return entity.choices
-    return None
 
-def _localization_actions(source, use_composition):
-    """Resolve localization.launch.py for one mode and report what it would start."""
+def _declared(launch_description):
+    return [e.name for e in launch_description.entities if isinstance(e, DeclareLaunchArgument)]
+
+
+def _localization_actions(use_composition):
+    """Resolve localization.launch.py and report what it would start."""
     module = _nav_launch("localization.launch.py")
     launch_description = module.generate_launch_description()
 
@@ -83,7 +81,6 @@ def _localization_actions(source, use_composition):
     # default when the configuration is unset, and `map` deliberately has no default.
     context.launch_configurations.update(
         {
-            "localization_source": source,
             "namespace": "isaacbot",
             "map": "/maps/map.yaml",
             "use_composition": use_composition,
@@ -123,40 +120,31 @@ def _localization_actions(source, use_composition):
 
     return plain, composable, node_names, amcl_overrides
 
-def test_choices_are_identical_across_launch_files():
-    """All three declarations of localization_source must offer the same modes."""
+
+def test_no_launch_file_takes_localization_source():
     per_file = {
-        "bringup": _declared_choices(_nav_launch("bringup.launch.py").generate_launch_description()),
-        "localization": _declared_choices(
-            _nav_launch("localization.launch.py").generate_launch_description()
-        ),
-        "mission_manager": _declared_choices(
-            _load(_MISSION_LAUNCH, "mission_launch").generate_launch_description()
-        ),
+        "bringup": _nav_launch("bringup.launch.py").generate_launch_description(),
+        "localization": _nav_launch("localization.launch.py").generate_launch_description(),
+        "indoor_localization": _nav_launch(
+            "indoor_localization.launch.py").generate_launch_description(),
+        "mission_manager": _load(_MISSION_LAUNCH, "mission_launch").generate_launch_description(),
     }
-    assert all(c is not None for c in per_file.values()), per_file
-    assert len({tuple(c) for c in per_file.values()}) == 1, per_file
-    assert sorted(per_file["bringup"]) == sorted(MODES), per_file
+    for name, launch_description in per_file.items():
+        assert "localization_source" not in _declared(launch_description), name
+
 
 @pytest.mark.parametrize("use_composition", ["True", "False"])
-def test_amcl_starts_only_in_amcl_mode(use_composition):
-    for source in MODES:
-        plain, composable, _, _ = _localization_actions(source, use_composition)
-        started = composable if use_composition == "True" else plain
-        assert ("amcl" in started) == (source in AMCL_MODES), (source, use_composition, started)
-        assert "map_server" in started, (source, started)
+def test_localization_launch_starts_map_server_and_amcl(use_composition):
+    plain, composable, node_names, _ = _localization_actions(use_composition)
+    started = composable if use_composition == "True" else plain
+    assert "map_server" in started and "amcl" in started, started
+    # Order matters: lifecycle_manager transitions in list order, and AMCL blocks
+    # waiting for the map, so map_server has to be activated first.
+    assert node_names == ["map_server", "amcl"], node_names
 
-@pytest.mark.parametrize("use_composition", ["True", "False"])
-def test_lifecycle_manager_manages_amcl_only_in_amcl_mode(use_composition):
-    for source in MODES:
-        _, _, node_names, _ = _localization_actions(source, use_composition)
-        expected = ["map_server", "amcl"] if source in AMCL_MODES else ["map_server"]
-        # Order matters: lifecycle_manager transitions in list order, and AMCL blocks
-        # waiting for the map, so map_server has to be activated first.
-        assert node_names == expected, (source, use_composition, node_names)
 
-def test_initial_pose_overrides_are_floats_and_only_for_amcl():
-    _, _, _, overrides = _localization_actions("amcl", "False")
+def test_initial_pose_overrides_are_floats():
+    _, _, _, overrides = _localization_actions("False")
     assert overrides == {
         "initial_pose.x": 1.5,
         "initial_pose.y": -2.25,
@@ -164,26 +152,6 @@ def test_initial_pose_overrides_are_floats_and_only_for_amcl():
     }, overrides
     # AMCL declares these as doubles; launch substitutions would hand it strings.
     assert all(isinstance(v, float) for v in overrides.values()), overrides
-
-    for source in ("odom", "gps", "slam"):
-        _, _, _, other = _localization_actions(source, "False")
-        assert other is None, (source, other)
-
-def test_bringup_forwards_localization_source_to_localization_launch():
-    """bringup must pass the mode down, or localization.launch.py silently defaults."""
-    from launch.actions import IncludeLaunchDescription
-
-    launch_description = _nav_launch("bringup.launch.py").generate_launch_description()
-    forwarded = []
-    for entity in launch_description.entities:
-        if not isinstance(entity, GroupAction):
-            continue
-        for action in entity._GroupAction__actions:
-            if isinstance(action, IncludeLaunchDescription):
-                forwarded.extend(k for k, _ in (action.launch_arguments or []))
-    assert "localization_source" in forwarded, forwarded
-    for name in ("initial_pose_x", "initial_pose_y", "initial_pose_yaw"):
-        assert name in forwarded, (name, forwarded)
 
 
 def _included_file(action):
@@ -194,14 +162,13 @@ def _included_file(action):
     return match.group(1) if match else str(action.launch_description_source.location)
 
 
-def _bringup_actions(source):
-    """Which of bringup's grouped actions run for a localization_source."""
+def _bringup_actions():
+    """Which of bringup's grouped actions run."""
     from launch.actions import IncludeLaunchDescription
 
     launch_description = _nav_launch("bringup.launch.py").generate_launch_description()
     context = LaunchContext()
     context.launch_configurations.update({
-        "localization_source": source,
         "namespace": "isaacbot",
         "use_composition": "True",
     })
@@ -220,13 +187,14 @@ def _bringup_actions(source):
     return running
 
 
-@pytest.mark.parametrize("source", MODES)
-def test_bringup_routes_localization_by_source(source):
-    running = _bringup_actions(source)
-    assert ("slam_launch.py" in running) == (source == "slam"), running
-    assert ("localization.launch.py" in running) == (source not in ("slam", "indoor")), running
-    assert ("indoor_nav_manager_node" in running) == (source == "indoor"), running
+def test_bringup_runs_nav2_and_the_manager_only():
+    running = _bringup_actions()
     assert "isaacbot_amr_nav.launch.py" in running, running
+    assert "indoor_nav_manager_node" in running, running
+    # The manager starts these itself; bringup starting them too would make two owners of
+    # map -> odom.
+    for absent in ("slam_launch.py", "localization.launch.py", "map_autosaver_node"):
+        assert absent not in running, (absent, running)
 
 
 def _indoor_includes(mode):
@@ -257,6 +225,6 @@ def test_indoor_localization_swaps_slam_and_amcl():
     localization = _indoor_includes("localization")
     assert list(localization) == ["localization.launch.py"]
     args = localization["localization.launch.py"]
-    # AMCL on, and out of nav2_container so stopping this launch never touches Nav 2.
-    assert args["localization_source"] == "indoor"
+    # Out of nav2_container so stopping this launch never touches Nav 2.
     assert args["use_composition"] == "False"
+    assert "localization_source" not in args

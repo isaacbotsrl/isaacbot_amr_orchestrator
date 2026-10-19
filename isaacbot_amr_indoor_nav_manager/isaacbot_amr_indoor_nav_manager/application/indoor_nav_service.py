@@ -17,6 +17,13 @@
 One class, because every use case reads or changes the same small state: which
 localization mode runs, on which map, and that map's places. Calls that switch the
 localization sub-stack block for seconds; the caller runs them off the ROS executor.
+
+Localization follows the range sensors on its own:
+
+* lidar and/or camera working, a map selected -> AMCL on that map;
+* lidar and/or camera working, no map selected -> SLAM;
+* neither working -> ODOMETRY: SLAM/AMCL keep running but get no scan, so map -> odom is
+  held and the isaacbot dead-reckons until a sensor is back.
 """
 
 import math
@@ -38,10 +45,12 @@ from ..domain.motion import StopDetector, StopThresholds
 from ..domain.ports import (
     IndoorNavObserver,
     LocalizationController,
+    MapOdomHold,
     MapRepository,
     MapSaver,
     RobotPoseSource,
 )
+from ..domain.sensors import ScanSource
 
 ORIGIN = Pose2D(0.0, 0.0, 0.0)
 
@@ -50,11 +59,15 @@ ORIGIN = Pose2D(0.0, 0.0, 0.0)
 RESTORE_SIGMA_XY = 1.5
 RESTORE_SIGMA_YAW = math.pi / 4
 
+NO_SENSOR = ('No lidar or camera works, so SLAM and AMCL have no scan. Wait until one is '
+             'back.')
+
 
 class IndoorNavService:
 
     def __init__(self, maps: MapRepository, localization: LocalizationController,
                  saver: MapSaver, robot: RobotPoseSource, observer: IndoorNavObserver,
+                 odom_hold: MapOdomHold,
                  stop_thresholds: StopThresholds = StopThresholds(),
                  restore_sigma_xy: float = RESTORE_SIGMA_XY,
                  restore_sigma_yaw: float = RESTORE_SIGMA_YAW):
@@ -63,6 +76,7 @@ class IndoorNavService:
         self._saver = saver
         self._robot = robot
         self._observer = observer
+        self._odom_hold = odom_hold
         self._lock = threading.RLock()
         self._state = LocalizationState()
         self._book = PlaceBook(map_name='')
@@ -72,6 +86,11 @@ class IndoorNavService:
         self._stops = StopDetector(stop_thresholds)
         self._restore_sigma_xy = restore_sigma_xy
         self._restore_sigma_yaw = restore_sigma_yaw
+        # Updated by on_scan_source() before and after startup(); NONE until a sensor is seen.
+        self._scan_source = ScanSource.NONE
+        self._started = False
+        # In ODOMETRY: the mode to go back to once a sensor works again.
+        self._resume_mode: Optional[LocalizationMode] = None
 
     # --- queries ---------------------------------------------------------------------
     @property
@@ -86,13 +105,28 @@ class IndoorNavService:
 
     # --- lifecycle -------------------------------------------------------------------
     def startup(self) -> None:
-        """Resume on the last active map, or start mapping when there is none."""
-        self._publish_maps()
-        active = self._maps.active_map()
-        if active and self._maps.exists(active):
-            self.load_map(active)
-        else:
-            self.start_mapping()
+        """Resume on the last active map, or start mapping when there is none.
+
+        Without a working sensor neither can localize: hold map -> odom (placing the isaacbot
+        at its last pose on the active map) and start SLAM/AMCL once a sensor is back.
+        """
+        with self._lock:
+            self._started = True
+            self._publish_maps()
+            active = self._maps.active_map()
+            if not (active and self._maps.exists(active)):
+                active = ''
+            if self._scan_source == ScanSource.NONE:
+                self._odom_hold.hold((self._maps.last_pose(active) or ORIGIN) if active else None)
+                self._resume_mode = (LocalizationMode.LOCALIZATION if active
+                                     else LocalizationMode.MAPPING)
+                self._set_state(LocalizationState(
+                    mode=LocalizationMode.ODOMETRY, map_name=active,
+                    message='No lidar or camera: dead-reckoning on odometry until one works.'))
+            elif active:
+                self._load_map(active)
+            else:
+                self._start_mapping()
 
     def shutdown(self) -> None:
         with self._lock:
@@ -100,6 +134,24 @@ class IndoorNavService:
             self.record_pose()
             self._localization.stop()
             self._set_state(LocalizationState(message='Stopped.'))
+
+    def on_scan_source(self, source: ScanSource) -> None:
+        """The range sensor feeding SLAM/AMCL changed (NONE: none works).
+
+        Losing the last one falls back to odometry; getting one back resumes. A switch between
+        lidar and camera needs nothing here: both reach SLAM/AMCL on the same topic.
+        """
+        with self._lock:
+            changed = source != self._scan_source
+            self._scan_source = source
+            mode = self._state.mode
+            if source == ScanSource.NONE and mode in (LocalizationMode.MAPPING,
+                                                      LocalizationMode.LOCALIZATION):
+                self._enter_odometry()
+            elif source != ScanSource.NONE and mode == LocalizationMode.ODOMETRY:
+                self._resume()
+            elif changed and self._started:  # before startup() there is no state to show
+                self._set_state(self._state)
 
     def check_health(self) -> None:
         """Report a sub-stack that died on its own; it is not restarted automatically."""
@@ -113,6 +165,12 @@ class IndoorNavService:
 
     # --- mapping / localization ------------------------------------------------------
     def start_mapping(self) -> None:
+        with self._lock:
+            if self._state.mode == LocalizationMode.ODOMETRY:
+                raise DomainError(NO_SENSOR)
+            self._start_mapping()
+
+    def _start_mapping(self) -> None:
         with self._lock:
             self.record_pose()  # remember where we were on the map we are leaving
             self._switching('Starting SLAM...')
@@ -130,7 +188,7 @@ class IndoorNavService:
     def save_map(self, name: str) -> None:
         with self._lock:
             validate_map_name(name)
-            if self._state.mode != LocalizationMode.MAPPING:
+            if not self._mapping():
                 raise DomainError('Start mapping before saving a map.')
             if self._maps.exists(name):
                 raise DomainError(f"A map named '{name}' already exists; delete it first or "
@@ -153,12 +211,18 @@ class IndoorNavService:
             validate_map_name(name)
             if not self._maps.exists(name):
                 raise DomainError(f"No map named '{name}'.")
+            if self._state.mode == LocalizationMode.ODOMETRY:
+                raise DomainError(NO_SENSOR)
+            self._load_map(name, initial_pose,
+                           SeedSource.EXPLICIT if initial_pose is not None else None)
+
+    def _load_map(self, name: str, pose: Optional[Pose2D] = None,
+                  source: Optional[SeedSource] = None) -> None:
+        with self._lock:
             # Remember where we were on the map we are leaving (or reloading) first, so a
             # reload of the same map starts from the freshest pose.
             self.record_pose()
-            if initial_pose is not None:
-                pose, source = initial_pose, SeedSource.EXPLICIT
-            else:
+            if pose is None:
                 pose, source = self._seed_pose(name)
             # Already localizing: swap the map under the running map_server + AMCL. Stopping
             # the stack is slow and disturbs every other ROS process, so it is only the
@@ -186,7 +250,9 @@ class IndoorNavService:
             self._set_places(PlaceBook(map_name=name, places=self._maps.load_places(name)))
             message = 'Localized on the saved map. Use Set pose if the isaacbot is elsewhere.'
             if source == SeedSource.LAST_POSE:
-                message = self._widen(pose) or message
+                message = self._widen(pose)
+            elif source == SeedSource.ODOMETRY:
+                message = self._widen(pose, from_odometry=True)
             self._set_state(LocalizationState(
                 mode=LocalizationMode.LOCALIZATION, map_name=name,
                 message=message + fallback_note))
@@ -197,7 +263,7 @@ class IndoorNavService:
             validate_map_name(name)
             if not self._maps.exists(name):
                 raise DomainError(f"No map named '{name}'.")
-            if self._state.mode == LocalizationMode.LOCALIZATION and self._state.map_name == name:
+            if self._localized_map() == name:
                 raise DomainError(f"'{name}' is the map in use; load another map or start "
                                   'mapping first.')
             self._maps.delete(name)
@@ -216,13 +282,18 @@ class IndoorNavService:
                 self.record_pose()
 
     def record_pose(self) -> None:
-        """Remember where the isaacbot is, so AMCL starts there after a restart."""
+        """Remember where the isaacbot is, so AMCL starts there after a restart.
+
+        Also while dead-reckoning on a saved map: a drifted pose beats the one from before the
+        sensors went, and AMCL gets a wide spread around it either way.
+        """
         with self._lock:
-            if self._state.mode != LocalizationMode.LOCALIZATION:
+            name = self._localized_map()
+            if not name:
                 return
             pose = self._robot.current_pose()
             if pose is not None:
-                self._maps.save_last_pose(self._state.map_name, pose)
+                self._maps.save_last_pose(name, pose)
 
     # --- places ----------------------------------------------------------------------
     def save_place(self, name: str, pose: Pose2D, place_id: str = '') -> Place:
@@ -254,20 +325,75 @@ class IndoorNavService:
             return remembered, SeedSource.LAST_POSE
         return ORIGIN, SeedSource.ORIGIN
 
-    def _widen(self, pose: Pose2D) -> str:
-        """Give AMCL a wider start around a remembered pose. Returns a note for the state."""
+    def _widen(self, pose: Pose2D, from_odometry: bool = False) -> str:
+        """Give AMCL a wider start around an uncertain pose. Returns a note for the state."""
+        what = 'the odometry pose' if from_odometry else 'the remembered pose'
         try:
             self._localization.widen_initial_estimate(
                 pose, self._restore_sigma_xy, self._restore_sigma_yaw)
         except Exception as error:  # noqa: BLE001 - AMCL still runs with its default spread
-            return f'Localized from the remembered pose (could not widen the search: {error}).'
+            return f'Localized from {what} (could not widen the search: {error}).'
+        if from_odometry:
+            return ('Sensor back: localizing again from the odometry pose (search widened). '
+                    'If AMCL does not converge, use Set pose or Find me.')
         return ('Localized from the last remembered pose (search widened once AMCL has its map). '
                 'If the isaacbot was moved while off, use Set pose or Find me.')
+
+    def _enter_odometry(self) -> None:
+        """The last sensor is gone: keep SLAM/AMCL (and an unsaved map) but hold map -> odom."""
+        resume = self._state.mode
+        self.record_pose()  # the last pose AMCL vouched for
+        self._odom_hold.hold()
+        self._resume_mode = resume
+        what = ('Mapping paused' if resume == LocalizationMode.MAPPING
+                else 'Dead-reckoning on odometry')
+        self._set_state(self._state.with_(
+            mode=LocalizationMode.ODOMETRY,
+            message=f'Lidar and camera lost. {what} until one is back.'))
+
+    def _resume(self) -> None:
+        resume, self._resume_mode = self._resume_mode, None
+        if self._localization.running():
+            # SLAM/AMCL kept running; AMCL moved its particles with the odometry meanwhile.
+            self._odom_hold.release()
+            message = 'Sensor back: mapping again.'
+            if resume == LocalizationMode.LOCALIZATION:
+                pose = self._robot.current_pose()
+                message = (self._widen(pose, from_odometry=True) if pose is not None
+                           else 'Sensor back: localizing again.')
+            self._set_state(self._state.with_(mode=resume, message=message))
+            return
+        # Started without a sensor, or the stack died meanwhile: start it now. The hold is
+        # released first but only lets go once SLAM/AMCL publish map -> odom themselves.
+        self._odom_hold.release()
+        active = self._maps.active_map()
+        if resume == LocalizationMode.LOCALIZATION and active and self._maps.exists(active):
+            # Where odometry has taken the isaacbot on the held map -> odom.
+            pose = self._robot.current_pose()
+            self._load_map(active, pose, SeedSource.ODOMETRY if pose is not None else None)
+        else:
+            self._start_mapping()
+
+    def _mapping(self) -> bool:
+        """SLAM is running, or paused while no sensor works."""
+        return (self._state.mode == LocalizationMode.MAPPING
+                or (self._state.mode == LocalizationMode.ODOMETRY
+                    and self._resume_mode == LocalizationMode.MAPPING))
+
+    def _localized_map(self) -> str:
+        """The saved map the isaacbot is on (by AMCL or dead-reckoning), else ''."""
+        mode = self._state.mode
+        if mode == LocalizationMode.LOCALIZATION or (
+                mode == LocalizationMode.ODOMETRY
+                and self._resume_mode == LocalizationMode.LOCALIZATION):
+            return self._state.map_name
+        return ''
 
     def _switching(self, message: str) -> None:
         self._set_state(self._state.with_(mode=LocalizationMode.SWITCHING, message=message))
 
     def _set_state(self, state: LocalizationState) -> None:
+        state = state.with_(scan_source=self._scan_source)
         self._state = state
         self._observer.on_state(state)
 

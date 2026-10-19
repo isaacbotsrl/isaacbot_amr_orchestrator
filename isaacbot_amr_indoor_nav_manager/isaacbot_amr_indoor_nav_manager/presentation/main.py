@@ -30,7 +30,8 @@ def main(args=None):
         signal.signal(signal.SIGINT, signal.default_int_handler)
     rclpy.init(args=args)
     node = IndoorNavNode()
-    executor = MultiThreadedExecutor(num_threads=4)
+    # Services, I/O, the scan relay and the map -> odom holder each have their own group.
+    executor = MultiThreadedExecutor(num_threads=6)
     executor.add_node(node)
     try:
         executor.spin()

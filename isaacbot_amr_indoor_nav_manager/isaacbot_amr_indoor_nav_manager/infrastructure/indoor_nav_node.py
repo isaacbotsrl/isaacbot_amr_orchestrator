@@ -12,7 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""The ROS node: services for the drive UI, timers, and the worker that runs switches."""
+"""The ROS node: services for the drive UI, timers, sensor watch, and the worker that runs
+switches."""
 
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 
@@ -29,6 +30,7 @@ from std_srvs.srv import Trigger
 from ..application.indoor_nav_service import IndoorNavService
 from ..domain.model import DomainError, Pose2D
 from ..domain.motion import StopThresholds
+from ..domain.sensors import SensorThresholds
 from .file_map_repository import FileMapRepository
 from .launch_localization_controller import LaunchLocalizationController
 from .ros_adapters import (
@@ -39,6 +41,7 @@ from .ros_adapters import (
     RosObserver,
     TfPoseSource,
 )
+from .ros_sensors import RosMapOdomHolder, RosSensorMonitor
 
 # How long a service call waits for a switch before answering "in progress". The drive UI
 # follows localization_state for the outcome, so it does not need to block for seconds.
@@ -77,6 +80,17 @@ class IndoorNavNode(Node):
         # Spread AMCL gets around a remembered pose after a restart (standard deviations).
         self.declare_parameter('restore_sigma_xy', 1.5)
         self.declare_parameter('restore_sigma_yaw', math.pi / 4)
+        # Range sensors: the lidar's LaserScan, the camera's (depthimage_to_laserscan), and the
+        # topic SLAM/AMCL read, which carries whichever of the two works (the lidar first).
+        self.declare_parameter('lidar_scan_topic', 'scan')
+        self.declare_parameter('camera_scan_topic', 'camera/scan')
+        self.declare_parameter('localization_scan_topic', 'localization/scan')
+        # The lidar driver's diagnostic; ERROR/STALE counts as lost even if scans still arrive.
+        self.declare_parameter('lidar_diagnostic', 'isaacbot_amr_rs16_lidar_node: Lidar status')
+        self.declare_parameter('sensor_timeout', 2.0)
+        self.declare_parameter('sensor_recover_time', 3.0)
+        # How long startup waits for a sensor before it starts on odometry alone.
+        self.declare_parameter('startup_sensor_grace', 10.0)
 
         params_file = self.get_parameter('localization_params_file').value
         if not params_file:
@@ -91,6 +105,9 @@ class IndoorNavNode(Node):
         self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix='indoor_nav')
         pose_source = TfPoseSource(
             self, ns_frame(namespace, 'map'), ns_frame(namespace, 'base_link'))
+        odom_hold = RosMapOdomHolder(
+            self, pose_source.buffer, ns_frame(namespace, 'map'), ns_frame(namespace, 'odom'),
+            ns_frame(namespace, 'base_link'), callback_group=MutuallyExclusiveCallbackGroup())
         seeder = RosInitialPoseSeeder(self, ns_frame(namespace, 'map'), pose_source)
         self._controller = LaunchLocalizationController(
             self.get_logger(), namespace.strip('/'), params_file, use_sim_time,
@@ -108,6 +125,7 @@ class IndoorNavNode(Node):
                               self.get_parameter('save_map_timeout').value, io_group),
             robot=pose_source,
             observer=RosObserver(self),
+            odom_hold=odom_hold,
             stop_thresholds=StopThresholds(
                 linear=self.get_parameter('stop_linear_threshold').value,
                 angular=self.get_parameter('stop_angular_threshold').value,
@@ -123,6 +141,17 @@ class IndoorNavNode(Node):
         self.create_subscription(
             Odometry, self.get_parameter('motion_topic').value, self._on_odometry,
             qos_profile_sensor_data, callback_group=io_group)
+
+        # Own group: a relayed scan must never wait behind a service call or a TF lookup.
+        self._sensors = RosSensorMonitor(
+            self, self.get_parameter('lidar_scan_topic').value,
+            self.get_parameter('camera_scan_topic').value,
+            self.get_parameter('localization_scan_topic').value,
+            self.get_parameter('lidar_diagnostic').value,
+            SensorThresholds(timeout=self.get_parameter('sensor_timeout').value,
+                             recover_time=self.get_parameter('sensor_recover_time').value),
+            on_source=lambda source: self._worker.submit(self.service.on_scan_source, source),
+            callback_group=MutuallyExclusiveCallbackGroup())
 
         g = self._services_group
         self.create_service(Trigger, 'start_mapping', self._start_mapping, callback_group=g)
@@ -160,6 +189,12 @@ class IndoorNavNode(Node):
             self.service.on_motion(*sample)
 
     def _startup(self):
+        grace = self.get_parameter('startup_sensor_grace').value
+        if not self._sensors.wait_for_sensor(grace):
+            self.get_logger().warning(
+                f'No lidar or camera scan within {grace:.0f} s; starting on odometry only')
+        # The source change that ended the wait is still queued behind this call.
+        self.service.on_scan_source(self._sensors.source)
         try:
             self.service.startup()
         except Exception as error:  # noqa: BLE001

@@ -54,14 +54,11 @@ this header in favour of it.
 
 ```bash
 ros2 launch isaacbot_amr_mission_manager isaacbot_amr_mission_manager.launch.py \
-  localization_source:=gps \
   namespace:=isaacbot
 ```
 
-`localization_source` **must match what `isaacbot_amr_navigation` was launched with** — it is what
-decides whether waypoints are interpreted in `<namespace>/odom` (`odom`) or
-`<namespace>/map` (`gps`, `slam`, `amcl`). `isaacbot_amr_navigation`'s
-`test_localization_launch.py` asserts the two argument declarations stay in sync.
+Waypoints are interpreted in `<namespace>/map`, Nav 2's global frame, which is always the map
+frame (`isaacbot_amr_indoor_nav_manager` owns `map -> odom`).
 
 ## Interfaces
 
@@ -146,7 +143,7 @@ live there, and `config/mission_manager.yaml` carries the deployed values. Notab
 | `bt_server_port` | `4444` | Groot2. The next free port is used if taken, so several managers coexist. |
 | `plugin_libs` | `[is_motion_locked_bt_node]` | Plain BT.CPP plugins. Built by `isaacbot_amr_navigation`. |
 | `ros_plugin_libs` | *(unset)* | See the note in `config/mission_manager.yaml` — an empty YAML list is rejected by rcl, so leave it unset rather than writing `[]`. |
-| `goal_frame_id` | `""` | Empty derives `<namespace>/odom`; the launch file sets it to `<namespace>/map` for `gps`, `slam` and `amcl`. |
+| `goal_frame_id` | `""` | Empty derives `<namespace>/map`, Nav 2's global frame. |
 | `drive_mode_topic` | `drive_mode` | Latched `isaacbot_amr_msgs/DriveMode` from `isaacbot_amr_drive_mode`. |
 | `require_automatic_drive_mode` | `true` | Missions run only in AUTOMATIC. `false` only without `isaacbot_amr_drive_mode`. |
 | `motion_lock_timeout` | `0.5` s | Publisher runs at 10 Hz. |

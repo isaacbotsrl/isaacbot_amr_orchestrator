@@ -17,6 +17,8 @@ if(BUILD_TESTING)
   ament_add_pytest_test(test_file_map_repository test/unit/test_file_map_repository.py)
   ament_add_pytest_test(test_launch_controller test/unit/test_launch_controller.py)
   ament_add_pytest_test(test_motion test/unit/test_motion.py)
+  ament_add_pytest_test(test_sensors test/unit/test_sensors.py)
+  ament_add_pytest_test(test_map_to_odom test/unit/test_map_to_odom.py)
   ament_add_pytest_test(test_initial_pose_msg test/unit/test_initial_pose_msg.py)
   ament_add_pytest_test(test_initial_pose_seeder test/unit/test_initial_pose_seeder.py)
   add_test(

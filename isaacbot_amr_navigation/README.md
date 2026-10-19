@@ -4,7 +4,8 @@ Package containing the Nav 2 configuration of the Ardennes — costmaps, MPPI co
 Smac 2D planner, recovery behaviors, behavior trees and map server.
 
 Mostly configuration — launch files, parameters, behavior trees and a map — plus two small
-pieces of C++: the `IsMotionLocked` behavior-tree condition and the SLAM `map_autosaver_node`.
+pieces of C++: the `IsMotionLocked` behavior-tree condition and the SLAM `map_autosaver_node`
+(built, but no longer launched by bringup).
 It runs on the orchestrator computer. Its commands end at a collision monitor
 (`nav_cmd_vel_guarded`), and `isaacbot_amr_drive_mode` forwards them to the platform
 (`nav_cmd_vel_stamped`, which `isaacbot_amr_twist_mux` arbitrates against the teleop sources) only in
@@ -60,17 +61,17 @@ When navigation runs on a different machine than the isaacbot, both must share t
 ## Launch Files
 
 - `bringup.launch.py` - top-level entry point. Starts the `nav2_container` component
-  container and includes the launch files below.
+  container, includes `isaacbot_amr_nav.launch.py` and always starts
+  [`isaacbot_amr_indoor_nav_manager`](../isaacbot_amr_indoor_nav_manager/README.md), which picks
+  and runs localization.
 - `isaacbot_amr_nav.launch.py` - the Nav 2 navigation servers plus
   `lifecycle_manager_navigation`.
-- `localization.launch.py` - `map_server` plus `lifecycle_manager_localization`, and
-  `nav2_amcl` when `localization_source:=amcl`. Used for `odom`, `gps` and `amcl`.
-- `slam_launch.py` - `slam_toolbox` plus `map_saver` and `lifecycle_manager_slam`. Used for
-  `localization_source:=slam`, and the only mode in which `map_autosaver_node` runs.
-- `indoor_localization.launch.py` - the swappable half of `localization_source:=indoor`.
-  `mode:=mapping` includes `slam_launch.py`, and `mode:=localization` includes
-  `localization.launch.py` with AMCL, uncomposed. It is not started by bringup: it is run and
-  replaced at runtime by `isaacbot_amr_indoor_nav_manager`, which bringup starts in this mode.
+- `localization.launch.py` - `map_server`, `nav2_amcl` and `lifecycle_manager_localization`.
+- `slam_launch.py` - `slam_toolbox` plus `map_saver` and `lifecycle_manager_slam`.
+- `indoor_localization.launch.py` - the swappable half of localization. `mode:=mapping`
+  includes `slam_launch.py`, and `mode:=localization` includes `localization.launch.py` with
+  AMCL, uncomposed. None of these three is started by bringup: `isaacbot_amr_indoor_nav_manager`
+  runs `indoor_localization.launch.py` and replaces it at runtime.
 
 ## Running
 
@@ -82,9 +83,7 @@ When navigation runs on a different machine than the isaacbot, both must share t
 ros2 launch isaacbot_amr_gazebo simulation.launch.py
 
 # terminal 2 - navigation
-ros2 launch isaacbot_amr_navigation bringup.launch.py \
-  use_sim_time:=True \
-  map:=$(ros2 pkg prefix isaacbot_amr_navigation)/share/isaacbot_amr_navigation/map/empty_world.yaml
+ros2 launch isaacbot_amr_navigation bringup.launch.py use_sim_time:=True
 ```
 
 #### Real isaacbot:
@@ -95,9 +94,7 @@ ros2 launch isaacbot_amr_bringup isaacbot_amr_bringup.launch.py
 ros2 launch isaacbot_amr_sensors_bringup isaacbot_amr_sensors.launch.py use_lidar:=true
 
 # on the isaacbot or on the orchestrator computer
-ros2 launch isaacbot_amr_navigation bringup.launch.py \
-  use_sim_time:=False \
-  map:=$(ros2 pkg prefix isaacbot_amr_navigation)/share/isaacbot_amr_navigation/map/empty_world.yaml
+ros2 launch isaacbot_amr_navigation bringup.launch.py use_sim_time:=False
 ```
 
 #### Namespaced:
@@ -121,15 +118,13 @@ Arguments of `bringup.launch.py` (`ros2 launch isaacbot_amr_navigation bringup.l
 |---|---|---|
 | `autostart` | `True` | Automatically start up the Nav 2 stack. |
 | `log_level` | `info` | Logging level: `debug`, `info`, `warning`, `error`. |
-| `map` | `empty_world.yaml` | Map yaml file to load. Pass an absolute path. |
+| `maps_dir` | `/maps` | Where `isaacbot_amr_indoor_nav_manager` keeps its maps, places and last pose (the `isaacbot-maps` volume in ardennes-orchestrator). |
 | `namespace` | `$ISAACBOT_AMR_SYSTEM_NAMESPACE`, else `$ROBOT_NAMESPACE`, else empty | Namespace applied to all launched nodes. |
-| `observation_topic` | `scan` | `LaserScan` topic for the costmaps' `stvl_layer`, AMCL and slam_toolbox; `isaacbot_amr_rs16_lidar` publishes it. |
+| `observation_topic` | `scan` | `LaserScan` topic for the costmaps' `stvl_layer` and `collision_monitor`; `isaacbot_amr_rs16_lidar` publishes it. AMCL and slam_toolbox read `localization/scan`, which `isaacbot_amr_indoor_nav_manager` relays from the lidar or the camera. |
 | `use_camera` | `$ISAACBOT_AMR_ORCH_NAV_USE_CAMERA`, else `false` | Add the RealSense depth cloud (`camera_depth_topic`) as a second source of the **local** costmap. Separate from `ISAACBOT_AMR_SYSTEM_USE_CAMERA`, which only starts the camera: turn this on once the camera mount (`ISAACBOT_AMR_SYSTEM_MOUNT_CAMERA_*`) is measured. |
 | `camera_depth_topic` | `camera/depth/points` | `PointCloud2` of the depth camera (`isaacbot_amr_perception_bringup`). Only used with `use_camera`. |
 | `params_file` | `<share>/isaacbot_amr_navigation/config/isaacbot_amr_nav_params.yaml` | Parameter file for all Nav 2 nodes. |
 | `robot_model` | `$ROBOT_MODEL_NAME`, else `ardennes` | Robot model; selects the footprint bounding box. |
-| `localization_source` | `odom` | Where the Nav 2 global frame comes from: `odom`, `gps`, `slam`, `amcl` or `indoor`. Replaces the old `slam` boolean. See below. |
-| `initial_pose_x` / `_y` / `_yaw` | `$ISAACBOT_AMR_ORCH_AMCL_INITIAL_POSE_{X,Y,YAW}`, else `0.0` | Pose AMCL is seeded with at startup, in `<namespace>/map`. Only used with `localization_source:=amcl`. |
 | `use_composition` | `True` | Load all servers into one component container. |
 | `use_respawn` | `False` | Respawn a crashed node. Only when composition is disabled. |
 | `use_sim_time` | `False` | Use the Gazebo clock. |
@@ -145,7 +140,7 @@ ros2 launch isaacbot_amr_navigation isaacbot_amr_nav.launch.py \
   params_file:=$(ros2 pkg prefix isaacbot_amr_navigation)/share/isaacbot_amr_navigation/config/isaacbot_amr_nav_params.yaml \
   use_composition:=False
 
-# map server only
+# map server + AMCL only
 ros2 launch isaacbot_amr_navigation localization.launch.py \
   params_file:=$(ros2 pkg prefix isaacbot_amr_navigation)/share/isaacbot_amr_navigation/config/isaacbot_amr_nav_params.yaml \
   map:=$(ros2 pkg prefix isaacbot_amr_navigation)/share/isaacbot_amr_navigation/map/empty_world.yaml
@@ -187,7 +182,7 @@ smoother, the collision monitor, drive mode and the motion lock all apply. It sh
 It does not plan: it drives straight at the person, so an obstacle between them makes the
 collision monitor slow and stop the isaacbot rather than route around it.
 
-The Nav 2 global frame depends on `localization_source` (see below); the robot frame is
+The Nav 2 global frame is always `<namespace>/map` (see below); the robot frame is
 always `<namespace>/base_link`, and the local costmap always stays on `<namespace>/odom`
 because it is a rolling window. Plugins in use:
 
@@ -213,36 +208,23 @@ because it is a rolling window. Plugins in use:
 - Footprint: a 0.98 x 0.98 m square, built from the `ardennes` bounding box hardcoded in
   `bringup.launch.py`.
 
-## Localization source
+## Localization
 
-`localization_source` decides **which frame Nav 2 plans in, and who publishes
-`map -> odom`**. Exactly one process may own that transform, so the three modes are mutually
-exclusive. This argument replaces the old `slam` boolean.
+Nav 2 always plans in **`<namespace>/map`**. Exactly one process may own `map -> odom`, and
+that is always [`isaacbot_amr_indoor_nav_manager`](../isaacbot_amr_indoor_nav_manager/README.md),
+through the sub-stack it runs. There is no launch argument or environment variable to pick a
+mode; the manager decides from the sensors and the selected map:
 
-| Mode | Nav 2 global frame | `map -> odom` published by | Use when |
-|---|---|---|---|
-| `odom` (default) | `<namespace>/odom` | nobody | No GPS, no SLAM. Navigation is odometry-relative and **drifts**; the global costmap's static layer will not line up with the map. |
-| `gps` | `<namespace>/map` | `isaacbot_amr_ekf_global_node` (`isaacbot_amr_localization`) | `ISAACBOT_AMR_SYSTEM_USE_GPS` is set on the isaacbot. Outdoors only — see the warning below. |
-| `slam` | `<namespace>/map` | `slam_toolbox` | Mapping a new area. Requires `ISAACBOT_AMR_SYSTEM_USE_GPS` **off**. |
-| `amcl` | `<namespace>/map` | `nav2_amcl` | **Indoors.** Matches the lidar scan against a static map. Needs a real map (build one in `slam` mode first), `ISAACBOT_AMR_SYSTEM_USE_LIDAR=true`, and `ISAACBOT_AMR_SYSTEM_GPS_MAP_TF=false`. |
-| `indoor` | `<namespace>/map` | `slam_toolbox` while mapping, `nav2_amcl` on a saved map | **Indoors, driven from the web UI.** [`isaacbot_amr_indoor_nav_manager`](../isaacbot_amr_indoor_nav_manager/README.md) switches between the two at runtime and keeps maps, places and the last pose in `/maps`. `map` and `initial_pose_*` are ignored. Same requirements as `amcl`. |
+| Manager state | When | `map -> odom` published by |
+|---|---|---|
+| `MAPPING` | lidar and/or camera working, no map selected | `slam_toolbox` |
+| `LOCALIZATION` | lidar and/or camera working, a map selected (`/maps/active`) | `nav2_amcl` |
+| `ODOMETRY` | neither working | the manager, holding the last `map -> odom` while the isaacbot dead-reckons |
 
-> **Do not use `gps` mode indoors.** It does not fail loudly, it fails silently.
-> `isaacbot_amr_gps_heading_node` needs roughly 9 m of straight driving with a horizontal
-> std under 5 m before it emits a heading, which never happens under a roof, so
-> `navsat_transform` never completes its transform and `odometry/gps` is never
-> published. The global EKF keeps dead-reckoning and still publishes `map -> odom`
-> at 50 Hz, so the isaacbot is effectively in `odom` mode while the config claims `gps`
-> — and near windows and doorways it is worse, because `wait_for_datum: false` pins
-> the map origin to the first (multipath) fix and that fix is then fused as absolute
-> X/Y with no quality gate. Use `amcl` or `slam` indoors.
-
-```bash
-# GPS-backed navigation, global frame isaacbot/map
-ros2 launch isaacbot_amr_navigation bringup.launch.py \
-  localization_source:=gps \
-  map:=$(ros2 pkg prefix isaacbot_amr_navigation)/share/isaacbot_amr_navigation/map/empty_world.yaml
-```
+AMCL and slam_toolbox read `localization/scan`, which the manager relays from the lidar
+(`scan`) or, when the lidar is lost, the RealSense (`camera/scan`). The GPS global EKF
+(`isaacbot_amr_ekf_global_node`) still fuses GPS into `odometry/global` but never publishes
+`map -> odom`.
 
 Check there is exactly one publisher before trusting a goal:
 
@@ -250,58 +232,42 @@ Check there is exactly one publisher before trusting a goal:
 ros2 run tf2_ros tf2_monitor isaacbot/map isaacbot/odom
 ```
 
-In `gps` mode the map's origin and the EKF datum (`isaacbot/localization/datum`) must describe
-the same place, or the static layer will be offset from the world by that difference. This is
-a configuration trap, not a bug — the transform will look perfectly healthy.
-
 ## Indoor navigation with AMCL
 
-Two phases: build a map once with SLAM, then navigate against it with AMCL. The mapping
-side is the existing `slam` mode and `map_autosaver_node` — nothing new.
+Two phases: build a map once with SLAM, then navigate against it with AMCL. Both run through
+`isaacbot_amr_indoor_nav_manager`, normally from the drive interface's **Facility** page.
 
 ### 1. Map the space (once per site)
 
-```bash
-# ISAACBOT_AMR_ORCH_LOCALIZATION_SOURCE=slam, ISAACBOT_AMR_SYSTEM_USE_GPS=false, ISAACBOT_AMR_SYSTEM_USE_LIDAR=true
-ros2 launch isaacbot_amr_navigation bringup.launch.py \
-  use_sim_time:=False localization_source:=slam \
-  map:=$(ros2 pkg prefix isaacbot_amr_navigation)/share/isaacbot_amr_navigation/map/empty_world.yaml
-```
-
-**Park the isaacbot where it will normally start before the stack comes up.** slam_toolbox
-puts the map origin at the start pose, which is what makes the default
-`initial_pose 0,0,0` correct later. Then teleop slowly through the whole area, closing at
-least one loop. `map_autosaver_node` calls `map_saver` every 15 s and writes
-`/maps/map.yaml` + `/maps/map.pgm`.
+**Park the isaacbot where it will normally start before mapping starts.** slam_toolbox
+puts the map origin at the start pose. With no map selected the manager starts mapping by
+itself; otherwise call `start_mapping`. Then teleop slowly through the whole area, closing at
+least one loop, and save it:
 
 ```bash
+ros2 service call /isaacbot/start_mapping std_srvs/srv/Trigger {}
+ros2 service call /isaacbot/save_map isaacbot_amr_msgs/srv/SaveMap "{name: site1}"   # /maps/site1/map.{yaml,pgm}
 ros2 topic echo /isaacbot/map --field info --once    # check it looks sane
 ls -l /maps/                                      # over SSH, port 24
-scp -P 24 root@<device>:/maps/map.* .             # back it up off the device
+scp -P 24 -r root@<device>:/maps/site1 .            # back it up off the device
 ```
 
 ### 2. Navigate against it
 
 ```bash
-ros2 launch isaacbot_amr_navigation bringup.launch.py \
-  use_sim_time:=False localization_source:=amcl map:=/maps/map.yaml
+ros2 service call /isaacbot/load_map isaacbot_amr_msgs/srv/LoadMap "{name: site1}"
 ```
 
-On the isaacbot set `ISAACBOT_AMR_ORCH_LOCALIZATION_SOURCE=amcl` and `ISAACBOT_AMR_ORCH_NAV_MAP=/maps/map.yaml`;
-changing a balenaCloud variable restarts the container, which re-reads them.
+Or load it from the drive interface. The manager switches to map_server + AMCL
+and remembers it in `/maps/active`, so the next start resumes on it.
 
 ### Initial pose
 
 AMCL is **seeded** from a known pose rather than scattering particles over the map:
 global relocalization converges slowly and, in corridors and repeated bays, can settle
-into the wrong self-similar hypothesis. If the isaacbot does not start at the map origin,
-find its pose once while still in `slam` mode, parked where it will start:
-
-```bash
-ros2 run tf2_ros tf2_echo isaacbot/map isaacbot/base_link
-```
-
-and put translation x/y and yaw into `ISAACBOT_AMR_ORCH_AMCL_INITIAL_POSE_{X,Y,YAW}`.
+into the wrong self-similar hypothesis. The manager seeds it from the map's remembered pose
+(`/maps/<name>/last_pose.yaml`) with a widened spread; use the drive interface's Set pose, or
+`initialpose` below, when the isaacbot was moved while off.
 
 ### If AMCL diverges
 
@@ -342,7 +308,7 @@ scan topic and the lidar before touching any tuning parameter.
 ros2 lifecycle get /isaacbot/bt_navigator     # expect: active [3]
 
 ros2 action send_goal /isaacbot/navigate_to_pose nav2_msgs/action/NavigateToPose \
-  "{pose: {header: {frame_id: isaacbot/odom}, pose: {position: {x: 2.0, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}}"
+  "{pose: {header: {frame_id: isaacbot/map}, pose: {position: {x: 2.0, y: 0.0, z: 0.0}, orientation: {w: 1.0}}}}"
 
 ros2 topic echo /isaacbot/nav_cmd_vel_guarded   # Nav 2's output
 ros2 topic echo /isaacbot/nav_cmd_vel_stamped   # what reaches the platform (AUTOMATIC only)
@@ -352,8 +318,8 @@ Nothing reaches the platform unless `isaacbot_amr_drive_mode` is running and in 
 (`ros2 service call /isaacbot/set_drive_mode isaacbot_amr_msgs/srv/SetDriveMode "{mode: 3}"`, which needs
 the mission manager).
 
-The goal `frame_id` must match the mode: **`isaacbot/odom`** with `localization_source:=odom`
-(as above), **`isaacbot/map`** with `gps`, `slam` or `amcl`.
+The goal `frame_id` is **`isaacbot/map`**, the Nav 2 global frame (also in `ODOMETRY`, where
+the manager holds `map -> odom`).
 
 ## Rotation Shim: after-turn measurements (2026-10-09, ground)
 
@@ -395,14 +361,13 @@ and wait for it to settle before any test), `AUTOMATIC` drive mode, isaacbot on 
 
 - **Never publish a static `map -> odom`.** Earlier revisions of this README suggested
   `static_transform_publisher --frame-id map --child-frame-id odom` to make the global
-  costmap's static layer usable. **Do not do that.** Since GPS fusion was integrated,
-  `isaacbot_amr_ekf_global_node` (started by `isaacbot_amr_localization` whenever `ISAACBOT_AMR_SYSTEM_USE_GPS` is
-  set) publishes `<namespace>/map -> <namespace>/odom` at 50 Hz. A static publisher would be a
-  second owner of that transform and the two would fight. Use `localization_source:=gps`
-  instead — see [Localization source](#localization-source).
-- **Only one process may own `map -> odom`.** The three producers are mutually exclusive:
-  `isaacbot_amr_ekf_global_node` (`gps`), `slam_toolbox` (`slam`) and `nav2_amcl` (`amcl`). Pick one
-  with `localization_source`. Two owners do not error -- they fight, and the symptom is a pose
+  costmap's static layer usable. **Do not do that.** `isaacbot_amr_indoor_nav_manager` always
+  owns `<namespace>/map -> <namespace>/odom` (slam_toolbox, AMCL, or its own hold without
+  sensors). A static publisher would be a second owner of that transform and the two would
+  fight — see [Localization](#localization).
+- **Only one process may own `map -> odom`.** The manager keeps `slam_toolbox`, `nav2_amcl`
+  and its own hold mutually exclusive; anything else publishing it is a bug. Two owners do not
+  error -- they fight, and the symptom is a pose
   that visibly jitters between two hypotheses at the rate difference of the two publishers.
   `ros2 run tf2_ros tf2_monitor isaacbot/map isaacbot/odom` names every broadcaster; expect exactly
   one.
@@ -419,12 +384,12 @@ and wait for it to settle before any test), `AUTOMATIC` drive mode, isaacbot on 
   height rather than re-tuning `min_z` blindly.
 - **AMCL never converges / the pose does not track.** In order of likelihood: the map is
   `empty_world.yaml` (every particle scores identically on 50 x 50 m of free space -- build a
-  real one in `slam` mode); the lidar is off (`ISAACBOT_AMR_SYSTEM_USE_LIDAR=true`, check
+  real one by mapping); the lidar is off (`ISAACBOT_AMR_SYSTEM_USE_LIDAR=true`, check
   `ros2 topic hz /<ns>/scan`); two processes own `map -> odom` (see above); the isaacbot did not
-  start where `initial_pose` says it did. `ISAACBOT_AMR_SYSTEM_MOUNT_LIDAR_Z` matters here too -- it
+  start where the seeded pose says it did. `ISAACBOT_AMR_SYSTEM_MOUNT_LIDAR_Z` matters here too -- it
   defaults to `0.0`, and the same mount height that breaks STVL's `min_z` also skews the scan
   geometry AMCL matches against. Set it before retuning anything.
-- **Along-corridor drift in `amcl` mode.** Long featureless corridors give AMCL no scan
+- **Along-corridor drift under AMCL.** Long featureless corridors give AMCL no scan
   evidence along their axis. `max_beams: 60` over a 20 m scan is on the low side for that;
   raise it to 90-120 before touching `sigma_hit` or `z_rand`.
 - **`consider_footprint: true` costs CPU.** MPPI's footprint sweep over 800x40 trajectory
@@ -433,8 +398,8 @@ and wait for it to settle before any test), `AUTOMATIC` drive mode, isaacbot on 
   falls below the 10 Hz `controller_frequency`, set
   `FollowPath.primary_controller.CostCritic.consider_footprint` back to `false` and accept
   point-check collision detection.
-- **Pass an absolute `map:=` path.** The bare-filename default is resolved against the
-  working directory of the process, not the package share directory.
+- **Pass an absolute `map:=` path** to `localization.launch.py` run on its own. A bare filename
+  is resolved against the working directory of the process, not the package share directory.
 - **Servers stay `inactive` / `unconfigured` and the log repeats `Timed out waiting for
   transform from base_link to odom`:** the isaacbot stack is not running. The costmaps block
   until `odom -> base_link` exists, so `controller_server` never finishes activating and

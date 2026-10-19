@@ -14,18 +14,28 @@
 
 import pytest
 
-from fakes import FakeLocalization, FakeMaps, FakeRobot, FakeSaver, RecordingObserver
+from fakes import (
+    FakeHold,
+    FakeLocalization,
+    FakeMaps,
+    FakeRobot,
+    FakeSaver,
+    RecordingObserver,
+)
 from isaacbot_amr_indoor_nav_manager.application.indoor_nav_service import IndoorNavService
 from isaacbot_amr_indoor_nav_manager.domain.model import DomainError, LocalizationMode, Pose2D
+from isaacbot_amr_indoor_nav_manager.domain.sensors import ScanSource
 
 
-def make(names=(), active='', pose=None):
+def make(names=(), active='', pose=None, source=ScanSource.LIDAR, hold=None):
     maps = FakeMaps(names, active)
     loc = FakeLocalization()
     saver = FakeSaver()
     robot = FakeRobot(pose)
     obs = RecordingObserver()
-    return IndoorNavService(maps, loc, saver, robot, obs), maps, loc, saver, robot, obs
+    svc = IndoorNavService(maps, loc, saver, robot, obs, hold or FakeHold())
+    svc.on_scan_source(source)  # before startup(): only remembered
+    return svc, maps, loc, saver, robot, obs
 
 
 def test_startup_without_maps_starts_mapping():
@@ -278,3 +288,133 @@ def test_load_restarts_when_not_localizing(before):
     del loc.calls[:]
     svc.load_map('hall', Pose2D(1, 0, 0))
     assert loc.calls == [('stop',), ('localization', '/maps/hall/map.yaml', Pose2D(1, 0, 0))]
+
+
+# --- sensor fallback ---------------------------------------------------------------------
+def test_scan_source_before_startup_publishes_nothing():
+    svc, _, loc, _, _, obs = make(source=ScanSource.CAMERA)
+    assert obs.states == [] and loc.calls == []
+
+
+def test_startup_reports_the_scan_source():
+    svc, _, _, _, _, _ = make(source=ScanSource.CAMERA)
+    svc.startup()
+    assert svc.state.mode == LocalizationMode.MAPPING
+    assert svc.state.scan_source == ScanSource.CAMERA
+
+
+def test_startup_without_sensors_holds_map_to_odom_at_the_last_pose():
+    hold = FakeHold()
+    svc, maps, loc, _, _, _ = make(names=['lab'], active='lab', source=ScanSource.NONE, hold=hold)
+    maps.maps['lab']['pose'] = Pose2D(2, 3, 1)
+    svc.startup()
+    assert svc.state.mode == LocalizationMode.ODOMETRY
+    assert svc.state.map_name == 'lab'
+    assert hold.calls == [('hold', Pose2D(2, 3, 1))]
+    assert loc.calls == []  # AMCL waits for a sensor
+
+
+def test_startup_without_sensors_or_map_holds_identity():
+    hold = FakeHold()
+    svc, _, loc, _, _, _ = make(source=ScanSource.NONE, hold=hold)
+    svc.startup()
+    assert svc.state.mode == LocalizationMode.ODOMETRY
+    assert hold.calls == [('hold', None)]
+    assert loc.calls == []
+
+
+def test_a_sensor_after_a_cold_odometry_start_starts_amcl_at_the_odometry_pose():
+    hold = FakeHold()
+    svc, maps, loc, _, robot, _ = make(names=['lab'], active='lab', source=ScanSource.NONE,
+                                       hold=hold)
+    svc.startup()
+    robot.pose = Pose2D(5, 1, 0.2)  # dead-reckoned on the held map -> odom
+    svc.on_scan_source(ScanSource.LIDAR)
+    assert svc.state.mode == LocalizationMode.LOCALIZATION
+    assert loc.calls[-1] == ('localization', '/maps/lab/map.yaml', Pose2D(5, 1, 0.2))
+    assert loc.widened[-1][0] == Pose2D(5, 1, 0.2)
+    assert hold.calls[-1] == ('release',)
+    assert 'odometry' in svc.state.message
+
+
+def test_a_sensor_after_a_cold_odometry_start_without_map_starts_slam():
+    svc, _, loc, _, _, _ = make(source=ScanSource.NONE)
+    svc.startup()
+    svc.on_scan_source(ScanSource.CAMERA)
+    assert svc.state.mode == LocalizationMode.MAPPING
+    assert svc.state.scan_source == ScanSource.CAMERA
+    assert loc.calls[-1] == ('mapping',)
+
+
+def test_losing_all_sensors_while_localized_holds_and_keeps_amcl():
+    hold = FakeHold()
+    svc, maps, loc, _, robot, _ = make(names=['lab'], pose=Pose2D(1, 1, 0), hold=hold)
+    svc.load_map('lab')
+    calls = list(loc.calls)
+    robot.pose = Pose2D(1.5, 1, 0)
+    svc.on_scan_source(ScanSource.NONE)
+    assert svc.state.mode == LocalizationMode.ODOMETRY
+    assert svc.state.map_name == 'lab'
+    assert hold.calls == [('hold', None)]
+    assert loc.calls == calls and loc.alive  # AMCL is not stopped
+    assert maps.maps['lab']['pose'] == Pose2D(1.5, 1, 0)
+
+
+def test_sensor_back_while_amcl_ran_releases_and_reseeds_wide():
+    hold = FakeHold()
+    svc, _, loc, _, robot, _ = make(names=['lab'], pose=Pose2D(1, 1, 0), hold=hold)
+    svc.load_map('lab')
+    svc.on_scan_source(ScanSource.NONE)
+    robot.pose = Pose2D(3, 1, 0)
+    calls = list(loc.calls)
+    svc.on_scan_source(ScanSource.CAMERA)
+    assert svc.state.mode == LocalizationMode.LOCALIZATION
+    assert loc.calls == calls  # nothing restarted
+    assert hold.calls[-1] == ('release',)
+    assert loc.widened[-1][0] == Pose2D(3, 1, 0)
+
+
+def test_losing_all_sensors_while_mapping_pauses_slam_and_still_saves():
+    hold = FakeHold()
+    svc, maps, loc, saver, _, _ = make(pose=Pose2D(0, 0, 0), hold=hold)
+    svc.start_mapping()
+    svc.on_scan_source(ScanSource.NONE)
+    assert svc.state.mode == LocalizationMode.ODOMETRY
+    assert loc.alive and hold.held
+    assert 'Mapping paused' in svc.state.message
+    svc.save_map('lab')  # the unsaved map is not lost
+    assert saver.saved == ['/maps/lab/map']
+    svc.on_scan_source(ScanSource.LIDAR)
+    assert svc.state.mode == LocalizationMode.MAPPING
+    assert not hold.held
+
+
+def test_odometry_refuses_mapping_and_loading():
+    svc, _, _, _, _, _ = make(names=['lab'], source=ScanSource.NONE)
+    svc.startup()
+    with pytest.raises(DomainError, match='No lidar or camera'):
+        svc.start_mapping()
+    with pytest.raises(DomainError, match='No lidar or camera'):
+        svc.load_map('lab')
+
+
+def test_odometry_keeps_the_dead_reckoned_map_in_use():
+    svc, maps, _, _, robot, _ = make(names=['lab', 'old'], active='lab',
+                                     source=ScanSource.NONE)
+    svc.startup()
+    with pytest.raises(DomainError):
+        svc.delete_map('lab')
+    robot.pose = Pose2D(4, 4, 0)
+    svc.record_pose()
+    assert maps.maps['lab']['pose'] == Pose2D(4, 4, 0)
+
+
+def test_switching_between_lidar_and_camera_only_republishes_the_state():
+    svc, _, loc, _, _, obs = make()
+    svc.startup()
+    calls, published = list(loc.calls), len(obs.states)
+    svc.on_scan_source(ScanSource.CAMERA)
+    assert loc.calls == calls
+    assert len(obs.states) == published + 1
+    assert obs.states[-1].scan_source == ScanSource.CAMERA
+    assert svc.state.mode == LocalizationMode.MAPPING

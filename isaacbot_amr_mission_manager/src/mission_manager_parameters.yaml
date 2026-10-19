@@ -116,8 +116,8 @@ mission_manager:
     default_value: ""
     description: >
       Frame that mission waypoints are expressed in. Leave empty to derive it from the node
-      namespace, which yields <namespace>/odom. It MUST match isaacbot_amr_navigation's
-      `localization_source`: <namespace>/map in gps or slam mode, <namespace>/odom otherwise.
+      namespace, which yields <namespace>/map: Nav 2's global frame, whose map -> odom
+      isaacbot_amr_indoor_nav_manager owns (SLAM/AMCL) or holds (odometry only).
 
   mission_status_topic:
     type: string
