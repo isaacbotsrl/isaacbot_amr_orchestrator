@@ -21,7 +21,7 @@
 #   ISAACBOT_AMR_SIM_RVIZ            start RViz with the simulation      (default: True)
 #   ISAACBOT_AMR_SIM_HEADLESS        Gazebo without its GUI              (default: False)
 #   ISAACBOT_AMR_SIM_TIMEOUT         seconds to wait for each part       (default: 180)
-#   ISAACBOT_AMR_SIM_SHIM_TURN_RATE  rotation shim turn rate in rad/s    (default: 0.7, isaacbot: 1.5)
+#   ISAACBOT_AMR_SIM_SHIM_TURN_RATE  rotation shim turn rate in rad/s    (default: 0.7, as on the isaacbot)
 
 set -o pipefail
 
@@ -206,10 +206,10 @@ $(pgrep -af "$running_re")"
 
   # Simulation copy of the Nav 2 parameters:
   # - AMCL's pose autosave writes to /maps/map on the isaacbot; point it at $MAPS_DIR.
-  # - The rotation shim turns at 1.0 rad/s on the isaacbot (skid-steer static friction). The
-  #   simulated wheels have none, and the shim does not brake before handing over to MPPI; at 1.5
-  #   MPPI inherited a spin it could not absorb (overshoot up to 60 deg, back and forth in place).
-  #   0.7 removes that.
+  # - The rotation shim turn rate, overridable for experiments. It is 0.7 rad/s on the isaacbot too
+  #   since the DCC1020 (it was 1.0 there against the DCC1000's stall). The shim does not brake
+  #   before handing over to MPPI; at 1.5 MPPI inherited a spin it could not absorb (overshoot up
+  #   to 60 deg, back and forth in place).
   local params="$LOG_DIR/isaacbot_amr_nav_params.yaml"
   sed -e "s|^\(\s*map_directory:\).*|\1 $MAPS_DIR/slam/map|" \
     -e "s|^\(\s*rotate_to_heading_angular_vel:\).*|\1 $SHIM_TURN_RATE|" \

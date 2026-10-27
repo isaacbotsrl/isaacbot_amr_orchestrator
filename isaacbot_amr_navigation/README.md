@@ -189,8 +189,10 @@ because it is a rolling window. Plugins in use:
 - Controller: `nav2_rotation_shim_controller::RotationShimController` wrapping
   `nav2_mppi_controller::MPPIController` (`DiffDrive` motion model, `vx_max 0.8`, `wz_max 1.5`,
   10 Hz). The shim turns the isaacbot in place to face the path once at the start
-  (`rotate_to_heading_once`) and for the final turn to the goal heading, at 1.0 rad/s with
-  `max_angular_accel` 1.3; MPPI drives in between. See
+  (`rotate_to_heading_once`) and for the final turn to the goal heading, at 0.7 rad/s with
+  `max_angular_accel` 3.74 (since 2026-10-27, DCC1020; to confirm on the ground); MPPI drives in
+  between. Acceleration limits: MPPI and velocity_smoother 2.7 m/s^2 / 3.74 rad/s^2,
+  = isaacbot_amr_drive_controller's (SWRS targets, ASSUMPTION until measured). See
   [Rotation Shim: after-turn measurements](#rotation-shim-after-turn-measurements-2026-10-09-ground).
   MPPI's parameters live under `FollowPath.primary_controller` (Nav 2 Kilted+ layout).
 - Progress checker: `nav2_controller::PoseProgressChecker`, so turning in place counts as
@@ -355,7 +357,9 @@ and wait for it to settle before any test), `AUTOMATIC` drive mode, isaacbot on 
   isaacbot now turns closed loop down to 0.3 rad/s (`isaacbot_amr_controller` notes, phase 4), so the comment above
   `rotate_to_heading_angular_vel` (stall below ~1.0 rad/s, measured 2026-09-26) was out of date.
   **Shipped 2026-10-10:** `rotate_to_heading_once: true`, `max_angular_accel: 1.3`,
-  `rotate_to_heading_angular_vel: 1.0` in `config/isaacbot_amr_nav_params.yaml`.
+  `rotate_to_heading_angular_vel: 1.0` in `config/isaacbot_amr_nav_params.yaml`. These were
+  DCC1000 measurements; since 2026-10-27 the shim runs at 0.7 rad/s / 3.74 rad/s^2, not yet
+  re-measured.
 
 ## Known Limitations and Troubleshooting
 

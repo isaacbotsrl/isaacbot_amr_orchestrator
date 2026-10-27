@@ -35,8 +35,8 @@ FOOTPRINT_HALF_WIDTH = 0.4008
 # What a turn in place sweeps: the footprint's corner radius.
 CORNER_RADIUS = (FOOTPRINT_HALF_LENGTH ** 2 + FOOTPRINT_HALF_WIDTH ** 2) ** 0.5
 
-# Commands the monitor may see: the UI caps at 1.0 m/s, the RC budget at 0.95 m/s and
-# 1.5 rad/s; the config promises [-2, 2] x [-4, 4].
+# Commands the monitor may see: the UI and RC caps are 1.2 m/s and 1.5 rad/s; the config
+# promises [-2, 2] x [-4, 4].
 LINEAR_SAMPLES = [x / 100.0 for x in range(-200, 201, 1)]
 ANGULAR_SAMPLES = [w / 10.0 for w in range(-40, 41, 1)]
 
