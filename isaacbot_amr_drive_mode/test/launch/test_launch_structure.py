@@ -59,6 +59,8 @@ def test_lifecycle_manager_activates_the_teleop_guard(drive_mode_launch):
     params = nodes['lifecycle_manager_teleop_guard']['parameters'][0]
     assert params['node_names'] == ['teleop_collision_monitor']
     assert params['autostart'] is True
+    # A graph-wide rmw_zenoh stall must not make the manager tear down a healthy monitor.
+    assert params['bond_timeout'] == 0.0
 
 
 def test_guard_nodes_and_manager_follow_use_teleop_guard(drive_mode_launch):

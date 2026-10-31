@@ -150,6 +150,13 @@ def generate_launch_description():
                 "use_sim_time": use_sim_time,
                 "autostart": True,
                 "node_names": [TELEOP_GUARD_NODE],
+                # No bond. rmw_zenoh can stall the whole graph for over 4 s while another
+                # container tears down many nodes (the indoor manager switching maps), past the
+                # default 4 s bond timeout. The manager then cleaned up a healthy monitor and hung,
+                # leaving ASSISTED on NO_DATA until a restart (2026-10-31). The bond adds no safety
+                # here: commands only reach the wheels through this monitor, so a dead one already
+                # stops the isaacbot, and a stale scan makes it stop and recover by itself.
+                "bond_timeout": 0.0,
             }
         ],
         arguments=["--ros-args", "--log-level", log_level],

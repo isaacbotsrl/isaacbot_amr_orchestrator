@@ -98,7 +98,8 @@ shown as `NO_DATA` rather than as an obstacle.
 ## Teleop collision monitor
 
 `config/teleop_collision_monitor.yaml`, node `teleop_collision_monitor`, activated by its own
-`lifecycle_manager_teleop_guard`. Two `velocity_polygon`s (`teleop_stop`, `teleop_slow`) whose
+`lifecycle_manager_teleop_guard`, with its bond off (`bond_timeout` 0): a dead monitor already
+stops the isaacbot, while a bond timeout during an rmw_zenoh stall took a healthy one down for good. Two `velocity_polygon`s (`teleop_stop`, `teleop_slow`) whose
 zone is picked from the **commanded** velocity: turning in place, driving forward, driving
 backward. An obstacle ahead therefore does not block backing away. The forward and reverse zones
 start at the footprint edge; the turn-in-place zone covers the swept corner radius (0.611 m).
